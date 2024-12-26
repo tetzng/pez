@@ -65,8 +65,6 @@ struct Author(String);
 #[derive(Clone, Debug)]
 struct Repo(String);
 
-// author/repoの文字列から、authorとrepoに分割して返す
-// returnがAuthor型とRepo型になるようにする
 fn parse_author_and_repo(path: &str) -> (Author, Repo) {
     let parts = path.split('/').collect::<Vec<&str>>();
     if parts.len() != 2 {
