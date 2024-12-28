@@ -1,17 +1,17 @@
 pub(crate) fn install(path: &str) {
-    let (author, repo) = crate::models::parse_author_and_repo(path);
-    let git_url = crate::utils::format_git_url(author.clone(), repo.clone());
+    let (owner, repo) = crate::models::parse_owner_and_repo(path);
+    let git_url = crate::utils::format_git_url(owner.clone(), repo.clone());
     println!("start to install {}", &git_url);
 
     let pez_dir = crate::utils::ensure_pez_dir();
     if !pez_dir.exists() {
         std::fs::create_dir_all(&pez_dir).unwrap();
     }
-    let author_dir = pez_dir.join(author.0.as_str());
-    if !author_dir.exists() {
-        std::fs::create_dir_all(&author_dir).unwrap();
+    let owner_dir = pez_dir.join(owner.0.as_str());
+    if !owner_dir.exists() {
+        std::fs::create_dir_all(&owner_dir).unwrap();
     }
-    let repo_path = author_dir.join(repo.0.as_str());
+    let repo_path = owner_dir.join(repo.0.as_str());
     if repo_path.exists() {
         println!("Repository already exists");
     } else if let Err(e) = crate::utils::clone_repo(&git_url, &repo_path) {
@@ -20,7 +20,7 @@ pub(crate) fn install(path: &str) {
         println!("Repository cloned successfully");
         let latest_commit_hash = crate::utils::get_latest_commit_hash(&repo_path).unwrap();
         let mut plugin = crate::models::Plugin {
-            author,
+            owner,
             repo,
             source: "github.com".to_owned(),
             hash: latest_commit_hash,

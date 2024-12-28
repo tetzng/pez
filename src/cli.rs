@@ -11,17 +11,17 @@ pub(crate) struct Cli {
 pub(crate) enum Commands {
     /// Install a fish plugin
     Install {
-        /// GitHub repo in the format <author>/<repo>
+        /// GitHub repo in the format <owner>/<repo>
         plugin: String,
     },
     /// Uninstall a fish plugin
     Uninstall {
-        /// GitHub repo in the format <author>/<repo>
+        /// GitHub repo in the format <owner>/<repo>
         plugin: String,
     },
     /// Upgrade all installed fish plugins
     Upgrade {
-        /// GitHub repo in the format <author>/<repo>
+        /// GitHub repo in the format <owner>/<repo>
         plugin: Option<String>,
     },
     /// List installed fish plugins

@@ -47,7 +47,7 @@ impl std::str::FromStr for TargetDir {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Plugin {
-    pub(crate) author: Author,
+    pub(crate) owner: Owner,
     pub(crate) repo: Repo,
     pub(crate) source: String,
     pub(crate) hash: String,
@@ -62,15 +62,15 @@ pub(crate) struct PluginFile {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Author(pub(crate) String);
+pub(crate) struct Owner(pub(crate) String);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Repo(pub(crate) String);
 
-pub(crate) fn parse_author_and_repo(path: &str) -> (Author, Repo) {
+pub(crate) fn parse_owner_and_repo(path: &str) -> (Owner, Repo) {
     let parts = path.split('/').collect::<Vec<&str>>();
     if parts.len() != 2 {
         panic!("Invalid repository path");
     }
-    (Author(parts[0].to_string()), Repo(parts[1].to_string()))
+    (Owner(parts[0].to_string()), Repo(parts[1].to_string()))
 }

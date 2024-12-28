@@ -19,8 +19,8 @@ pub(crate) fn get_latest_commit_hash(repo_path: &std::path::Path) -> Result<Stri
     Ok(commit.id().to_string())
 }
 
-pub(crate) fn format_git_url(author: crate::models::Author, repo: crate::models::Repo) -> String {
-    format!("https://github.com/{}/{}.git", author.0, repo.0)
+pub(crate) fn format_git_url(owner: crate::models::Owner, repo: crate::models::Repo) -> String {
+    format!("https://github.com/{}/{}.git", owner.0, repo.0)
 }
 
 pub(crate) fn ensure_pez_dir() -> PathBuf {
