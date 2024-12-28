@@ -27,7 +27,6 @@ pub(crate) fn install(path: &str) {
             files: vec![],
         };
         crate::utils::copy_files_to_config(&repo_path, &mut plugin);
-        let pez_dir = crate::utils::ensure_pez_dir();
         let lock_file_path = pez_dir.join("pez-lock.toml");
 
         let config_dir = crate::utils::ensure_config_dir();

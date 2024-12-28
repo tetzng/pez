@@ -21,6 +21,14 @@ impl TargetDir {
             TargetDir::Themes => "themes",
         }
     }
+    pub(crate) fn all() -> Vec<Self> {
+        vec![
+            TargetDir::Functions,
+            TargetDir::Completions,
+            TargetDir::ConfD,
+            TargetDir::Themes,
+        ]
+    }
 }
 
 impl std::str::FromStr for TargetDir {

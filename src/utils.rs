@@ -36,12 +36,7 @@ pub(crate) fn ensure_pez_dir() -> PathBuf {
 
 pub(crate) fn copy_files_to_config(repo_dir: &std::path::Path, plugin: &mut crate::models::Plugin) {
     let config_dir = ensure_config_dir();
-    let target_dirs = vec![
-        crate::models::TargetDir::Functions,
-        crate::models::TargetDir::Completions,
-        crate::models::TargetDir::ConfD,
-        crate::models::TargetDir::Themes,
-    ];
+    let target_dirs = crate::models::TargetDir::all();
     let mut has_target_file = false;
 
     for target_dir in target_dirs {
