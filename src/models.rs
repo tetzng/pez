@@ -47,10 +47,10 @@ impl std::str::FromStr for TargetDir {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Plugin {
-    pub(crate) owner: Owner,
-    pub(crate) repo: Repo,
+    pub(crate) name: String,
+    pub(crate) repo: String,
     pub(crate) source: String,
-    pub(crate) hash: String,
+    pub(crate) commit_sha: String,
     pub(crate) files: Vec<PluginFile>,
 }
 
@@ -58,19 +58,15 @@ pub(crate) struct Plugin {
 pub(crate) struct PluginFile {
     pub(crate) dir: TargetDir,
     pub(crate) name: String,
-    pub(crate) hash: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Owner(pub(crate) String);
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct Repo(pub(crate) String);
-
-pub(crate) fn parse_owner_and_repo(path: &str) -> (Owner, Repo) {
-    let parts = path.split('/').collect::<Vec<&str>>();
-    if parts.len() != 2 {
-        panic!("Invalid repository path");
+impl Plugin {
+    pub(crate) fn get_name(&self) -> String {
+        if self.name.is_empty() {
+            let parts: Vec<&str> = self.source.split("/").collect();
+            parts[parts.len() - 1].to_owned()
+        } else {
+            self.name.clone()
+        }
     }
-    (Owner(parts[0].to_string()), Repo(parts[1].to_string()))
 }

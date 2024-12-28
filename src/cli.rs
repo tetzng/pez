@@ -1,7 +1,7 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(name = "pez", version, about, long_about = None)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Commands,
@@ -9,25 +9,53 @@ pub(crate) struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum Commands {
-    /// Install a fish plugin
-    Install {
-        /// GitHub repo in the format <owner>/<repo>
-        plugin: String,
-    },
-    /// Uninstall a fish plugin
-    Uninstall {
-        /// GitHub repo in the format <owner>/<repo>
-        plugin: String,
-    },
-    /// Upgrade all installed fish plugins
-    Upgrade {
-        /// GitHub repo in the format <owner>/<repo>
-        plugin: Option<String>,
-    },
+    /// Initialize pez
+    Init,
+
+    /// Install fish plugin(s)
+    Install(InstallArgs),
+    // /// GitHub repo in the format <owner>/<repo>
+    // plugins: Option<Vec<String>>,
+
+    // #[clap(flatten)]
+    // opts: InstallOpts,
+    /// Uninstall fish plugin(s)
+    Uninstall(UninstallArgs),
+
+    /// Upgrade installed fish plugin(s)
+    Upgrade(UpgradeArgs),
+
     /// List installed fish plugins
-    List {
-        /// show all plugin files
-        #[arg(long)]
-        all_files: bool,
-    },
+    List(ListArgs),
+
+    /// Prune uninstalled plugins
+    Prune,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct InstallArgs {
+    /// GitHub repo in the format <owner>/<repo>
+    pub(crate) plugins: Option<Vec<String>>,
+    /// Force install even if the plugin is already installed
+    #[arg(short, long)]
+    pub(crate) force: bool,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct UninstallArgs {
+    /// GitHub repo in the format <owner>/<repo>
+    pub(crate) plugins: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct UpgradeArgs {
+    /// GitHub repo in the format <owner>/<repo>
+    pub(crate) plugins: Option<Vec<String>>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct ListArgs {
+    /// Show only outdated plugins
+    #[arg(short, long)]
+    pub(crate) outdated: bool,
 }

@@ -1,41 +1,68 @@
-use sha2::{Digest, Sha256};
-use std::fs;
 use std::{env, path::PathBuf};
 
-pub(crate) fn clone_repo(url: &str, path: &std::path::Path) -> Result<(), git2::Error> {
-    let mut opts = git2::FetchOptions::new();
-    opts.download_tags(git2::AutotagOption::All);
-    let mut builder = git2::build::RepoBuilder::new();
-    builder.fetch_options(opts);
-    builder.clone(url, path)?;
+pub(crate) fn resolve_fish_config_dir() -> PathBuf {
+    if let Some(dir) = env::var_os("__fish_config_dir") {
+        return PathBuf::from(dir);
+    }
 
-    Ok(())
+    if let Some(dir) = env::var_os("XDG_CONFIG_HOME") {
+        return PathBuf::from(dir).join("fish");
+    }
+
+    let home = env::var("HOME").unwrap();
+    PathBuf::from(home).join(".config/fish")
 }
 
-pub(crate) fn get_latest_commit_hash(repo_path: &std::path::Path) -> Result<String, git2::Error> {
-    let repo = git2::Repository::open(repo_path)?;
-    let head = repo.head()?;
-    let commit = head.peel_to_commit()?;
+pub(crate) fn resolve_pez_config_dir() -> PathBuf {
+    if let Some(dir) = env::var_os("PEZ_CONFIG_DIR") {
+        return PathBuf::from(dir);
+    }
+
+    resolve_fish_config_dir()
+}
+
+pub(crate) fn resolve_pez_data_dir() -> PathBuf {
+    if let Some(dir) = env::var_os("PEZ_DATA_DIR") {
+        return PathBuf::from(dir);
+    }
+
+    let fish_data_dir = resolve_fish_data_dir();
+    fish_data_dir.join("pez")
+}
+
+pub(crate) fn resolve_fish_data_dir() -> PathBuf {
+    if let Some(dir) = env::var_os("__fish_user_data_dir") {
+        return PathBuf::from(dir);
+    }
+
+    if let Some(dir) = env::var_os("XDG_DATA_HOME") {
+        return PathBuf::from(dir).join("fish");
+    }
+
+    let home = env::var("HOME").unwrap();
+    PathBuf::from(home).join(".local/share/fish")
+}
+
+pub(crate) fn resolve_lock_file_path() -> PathBuf {
+    let pez_config_dir = crate::utils::resolve_pez_config_dir();
+    if !pez_config_dir.exists() {
+        std::fs::create_dir_all(&pez_config_dir).unwrap();
+    }
+    pez_config_dir.join("pez-lock.toml")
+}
+
+pub(crate) fn get_latest_commit_sha(repo: git2::Repository) -> Result<String, git2::Error> {
+    let commit = repo.head()?.peel_to_commit()?;
+
     Ok(commit.id().to_string())
 }
 
-pub(crate) fn format_git_url(owner: crate::models::Owner, repo: crate::models::Repo) -> String {
-    format!("https://github.com/{}/{}.git", owner.0, repo.0)
-}
-
-pub(crate) fn ensure_pez_dir() -> PathBuf {
-    if let Some(dir) = env::var_os("__fish_user_data_dir") {
-        return PathBuf::from(dir).join("pez");
-    }
-    if let Some(dir) = env::var_os("XDG_DATA_HOME") {
-        return PathBuf::from(dir).join("fish").join("pez");
-    }
-    let home = env::var("HOME").unwrap();
-    PathBuf::from(home).join(".local/share/fish/pez")
+pub(crate) fn format_git_url(plugin: &str) -> String {
+    format!("https://github.com/{plugin}")
 }
 
 pub(crate) fn copy_files_to_config(repo_dir: &std::path::Path, plugin: &mut crate::models::Plugin) {
-    let config_dir = ensure_config_dir();
+    let config_dir = resolve_fish_config_dir();
     let target_dirs = crate::models::TargetDir::all();
     let mut has_target_file = false;
 
@@ -53,7 +80,6 @@ pub(crate) fn copy_files_to_config(repo_dir: &std::path::Path, plugin: &mut crat
             println!("Created directory: {}", dest_path.display());
         }
         let files = std::fs::read_dir(target_path).unwrap();
-        println!("Copying files to {}", dest_path.display());
         for file in files {
             let file = file.unwrap();
             if file.file_type().unwrap().is_dir() {
@@ -67,7 +93,6 @@ pub(crate) fn copy_files_to_config(repo_dir: &std::path::Path, plugin: &mut crat
             let plugin_file = crate::models::PluginFile {
                 dir: target_dir.clone(),
                 name: file_name.to_string_lossy().to_string(),
-                hash: calculate_file_hash(&file_path),
             };
             plugin.files.push(plugin_file);
         }
@@ -75,22 +100,4 @@ pub(crate) fn copy_files_to_config(repo_dir: &std::path::Path, plugin: &mut crat
     if !has_target_file {
         println!("No target files found");
     }
-}
-
-pub(crate) fn ensure_config_dir() -> PathBuf {
-    if let Some(dir) = env::var_os("__fish_config_dir") {
-        return PathBuf::from(dir);
-    }
-    if let Some(dir) = env::var_os("XDG_CONFIG_HOME") {
-        return PathBuf::from(dir).join("fish");
-    }
-    let home = env::var("HOME").unwrap();
-    PathBuf::from(home).join(".config/fish")
-}
-
-pub(crate) fn calculate_file_hash(path: &std::path::PathBuf) -> String {
-    let content = fs::read(path).unwrap();
-    let mut hasher = Sha256::new();
-    hasher.update(content);
-    format!("{:x}", hasher.finalize())
 }
