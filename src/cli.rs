@@ -14,11 +14,7 @@ pub(crate) enum Commands {
 
     /// Install fish plugin(s)
     Install(InstallArgs),
-    // /// GitHub repo in the format <owner>/<repo>
-    // plugins: Option<Vec<String>>,
 
-    // #[clap(flatten)]
-    // opts: InstallOpts,
     /// Uninstall fish plugin(s)
     Uninstall(UninstallArgs),
 
@@ -36,6 +32,7 @@ pub(crate) enum Commands {
 pub(crate) struct InstallArgs {
     /// GitHub repo in the format <owner>/<repo>
     pub(crate) plugins: Option<Vec<String>>,
+
     /// Force install even if the plugin is already installed
     #[arg(short, long)]
     pub(crate) force: bool,

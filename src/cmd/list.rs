@@ -19,15 +19,9 @@ pub(crate) fn run(args: &ListArgs) {
 }
 
 fn list() {
-    // lock fileからpluginsを取得して、tableで表示
-
-    // | name | sorce | commit |
-    // |------|-------|--------|
-    // | plugin.get_name()| plugin.source | plugin.commit_sha |
     let lock_file_path = crate::utils::resolve_lock_file_path();
     if lock_file_path.exists() {
         let lock_file = crate::lock_file::load(&lock_file_path);
-        // tabledを使って表示
         let plugins = lock_file
             .plugins
             .iter()

@@ -4,7 +4,7 @@ use serde_derive::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Config {
-    pub(crate) plugins: Vec<PluginSpec>,
+    pub(crate) plugins: Option<Vec<PluginSpec>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -15,7 +15,7 @@ pub(crate) struct PluginSpec {
 }
 
 pub(crate) fn init() -> Config {
-    Config { plugins: vec![] }
+    Config { plugins: None }
 }
 
 pub(crate) fn load(path: &PathBuf) -> Config {
