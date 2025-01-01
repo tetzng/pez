@@ -1,15 +1,7 @@
-use std::path::PathBuf;
-
-use crate::{
-    cli::InstallArgs,
-    config::PluginSpec,
-    lock_file::{LockFile, AUTO_GENERATED_COMMENT},
-    utils::copy_files_to_config,
-};
-
-pub(crate) fn run(args: &InstallArgs) {
+pub(crate) fn run(args: &crate::cli::InstallArgs) {
     if let Some(plugins) = &args.plugins {
         for plugin in plugins {
+            println!("Installing {}", &plugin);
             install(plugin, &args.force);
         }
     } else {
@@ -17,98 +9,65 @@ pub(crate) fn run(args: &InstallArgs) {
     }
 }
 
-fn install(plugin_repo: &str, force: &bool) {
+fn install(plugin_repo: &str, force: &bool) -> crate::models::Plugin {
     let parts = plugin_repo.split("/").collect::<Vec<&str>>();
     if parts.len() != 2 {
-        eprintln!("Invalid plugin format: {}", plugin_repo);
-        return;
+        eprintln!("Invalid plugin format: {}", plugin_repo)
     }
-
     let name = parts[1].to_string();
-    let source = crate::utils::format_git_url(plugin_repo);
+    let source = &crate::git::format_git_url(plugin_repo);
 
-    let pez_config_dir = crate::utils::resolve_pez_config_dir();
-    if !pez_config_dir.exists() {
-        std::fs::create_dir_all(&pez_config_dir).unwrap();
-    }
-
-    let pez_toml_path = pez_config_dir.join("pez.toml");
-
-    let mut config = if pez_toml_path.exists() {
-        crate::config::load(&pez_toml_path)
-    } else {
-        crate::config::init()
-    };
+    let (mut config, config_path) = crate::utils::ensure_config();
 
     match config.plugins {
-        Some(ref mut plugin_vec) => {
-            if !plugin_vec.iter().any(|p| p.repo == plugin_repo) {
-                plugin_vec.push(PluginSpec {
+        Some(ref mut plugin_specs) => {
+            if !plugin_specs.iter().any(|p| p.repo == plugin_repo) {
+                plugin_specs.push(crate::config::PluginSpec {
                     repo: plugin_repo.to_string(),
                     name: None,
                     source: None,
                 });
-                let config_contents = toml::to_string(&config).unwrap();
-                std::fs::write(&pez_toml_path, config_contents).unwrap();
+                config.save(&config_path);
             }
         }
-
         None => {
-            config.plugins = Some(vec![PluginSpec {
+            config.plugins = Some(vec![crate::config::PluginSpec {
                 repo: plugin_repo.to_string(),
                 name: None,
                 source: None,
             }]);
-            let config_contents = toml::to_string(&config).unwrap();
-            std::fs::write(&pez_toml_path, config_contents).unwrap();
+            config.save(&config_path);
         }
     }
 
-    let repo_path = crate::utils::resolve_pez_data_dir().join(&name);
+    let repo_path = crate::utils::resolve_pez_data_dir().join(plugin_repo);
 
-    let lock_file_path = crate::utils::resolve_lock_file_path();
-    let mut lock_file = load_or_initialize_lock_file(&lock_file_path);
+    let (mut lock_file, lock_file_path) = crate::utils::ensure_lock_file();
 
-    match lock_file.get_plugin(&source) {
+    match lock_file.get_plugin(source) {
         Some(locked_plugin) => {
             if repo_path.exists() {
                 if *force {
                     std::fs::remove_dir_all(&repo_path).unwrap();
-                    lock_file.remove_plugin(&source);
-                    let repo = git2::Repository::clone(&source, &repo_path).unwrap();
-                    let commit_sha = crate::utils::get_latest_commit_sha(repo).unwrap();
-                    let mut plugin = crate::models::Plugin {
-                        name,
-                        repo: plugin_repo.to_string(),
-                        source,
-                        commit_sha,
-                        files: vec![],
-                    };
-                    copy_files_to_config(&repo_path, &mut plugin);
-                    lock_file.add_plugin(plugin);
-                    let lock_file_contents = toml::to_string(&lock_file).unwrap();
-                    std::fs::write(
-                        lock_file_path,
-                        AUTO_GENERATED_COMMENT.to_string() + &lock_file_contents,
-                    )
-                    .unwrap();
                 } else {
                     eprintln!("Plugin already exists: {}, Use --force to reinstall", name)
                 }
-            } else {
-                let repo = git2::Repository::clone(&source, &repo_path).unwrap();
-                repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha).unwrap())
-                    .unwrap();
-                let mut plugin = crate::models::Plugin {
-                    name,
-                    repo: plugin_repo.to_string(),
-                    source,
-                    commit_sha: locked_plugin.commit_sha.clone(),
-                    files: vec![],
-                };
-                crate::utils::copy_files_to_config(&repo_path, &mut plugin);
-                lock_file.update_plugin(plugin);
             }
+
+            let repo = crate::git::clone_repository(source, &repo_path).unwrap();
+            repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha).unwrap())
+                .unwrap();
+            let mut plugin = crate::models::Plugin {
+                name: name.to_string(),
+                repo: plugin_repo.to_string(),
+                source: source.to_string(),
+                commit_sha: locked_plugin.commit_sha.clone(),
+                files: vec![],
+            };
+            crate::utils::copy_files_to_config(&repo_path, &mut plugin);
+            lock_file.update_plugin(plugin.clone());
+            lock_file.save(&lock_file_path);
+            plugin
         }
         None => {
             if repo_path.exists() {
@@ -118,37 +77,29 @@ fn install(plugin_repo: &str, force: &bool) {
                     eprintln!("Plugin already exists: {}, Use --force to reinstall", name)
                 }
             }
-            let repo = git2::Repository::clone(&source, &repo_path).unwrap();
-            let commit_sha = crate::utils::get_latest_commit_sha(repo).unwrap();
+
+            let repo = git2::Repository::clone(source, &repo_path).unwrap();
+            let commit_sha = crate::git::get_latest_commit_sha(repo).unwrap();
             let mut plugin = crate::models::Plugin {
-                name,
+                name: name.to_string(),
                 repo: plugin_repo.to_string(),
-                source,
+                source: source.to_string(),
                 commit_sha,
                 files: vec![],
             };
             crate::utils::copy_files_to_config(&repo_path, &mut plugin);
 
-            lock_file.add_plugin(plugin);
-
-            let lock_file_contents = toml::to_string(&lock_file).unwrap();
-            std::fs::write(
-                lock_file_path,
-                AUTO_GENERATED_COMMENT.to_string() + &lock_file_contents,
-            )
-            .unwrap();
-
-            println!("Files copied to config directory");
+            lock_file.add_plugin(plugin.clone());
+            lock_file.save(&lock_file_path);
+            plugin
         }
     }
 }
 
 fn install_from_lock_file(force: &bool) {
-    let lock_file_path = crate::utils::resolve_lock_file_path();
-    let mut lock_file = load_or_initialize_lock_file(&lock_file_path);
+    let (mut lock_file, lock_file_path) = crate::utils::ensure_lock_file();
+    let (config, _) = crate::utils::ensure_config();
 
-    let pez_toml_path = crate::utils::resolve_pez_config_dir().join("pez.toml");
-    let config = crate::config::load(&pez_toml_path);
     let plugin_specs = match config.plugins {
         Some(plugins) => plugins,
         None => {
@@ -158,65 +109,79 @@ fn install_from_lock_file(force: &bool) {
     };
 
     for plugin_spec in plugin_specs.iter() {
+        let source = crate::git::format_git_url(&plugin_spec.repo);
         let repo_path = crate::utils::resolve_pez_data_dir().join(&plugin_spec.repo);
-        if repo_path.exists() {
-            if *force {
-                std::fs::remove_dir_all(&repo_path).unwrap();
-                let source = crate::utils::format_git_url(&plugin_spec.repo);
-                lock_file.remove_plugin(&source);
-                let repo = git2::Repository::clone(&source, &repo_path).unwrap();
-                let commit_sha = crate::utils::get_latest_commit_sha(repo).unwrap();
+
+        match lock_file.get_plugin(&source) {
+            Some(locked_plugin) => {
+                if repo_path.exists() {
+                    continue;
+                }
+                println!("Installing {}", plugin_spec.repo);
+
+                let repo = crate::git::clone_repository(&source, &repo_path).unwrap();
+                repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha).unwrap())
+                    .unwrap();
                 let mut plugin = crate::models::Plugin {
                     name: plugin_spec.get_name(),
-                    repo: plugin_spec.repo.to_string(),
-                    source,
+                    repo: plugin_spec.repo.clone(),
+                    source: source.to_string(),
+                    commit_sha: locked_plugin.commit_sha.clone(),
+                    files: vec![],
+                };
+                crate::utils::copy_files_to_config(&repo_path, &mut plugin);
+                lock_file.update_plugin(plugin);
+                lock_file.save(&lock_file_path);
+            }
+            None => {
+                if repo_path.exists() {
+                    if *force {
+                        std::fs::remove_dir_all(&repo_path).unwrap();
+                    } else {
+                        eprintln!(
+                            "Plugin already exists: {}, Use --force to reinstall",
+                            plugin_spec.repo
+                        )
+                    }
+                }
+
+                println!("Installing {}", plugin_spec.repo);
+
+                let repo = git2::Repository::clone(&source, &repo_path).unwrap();
+                let commit_sha = crate::git::get_latest_commit_sha(repo).unwrap();
+                let mut plugin = crate::models::Plugin {
+                    name: plugin_spec.get_name(),
+                    repo: plugin_spec.repo.clone(),
+                    source: source.to_string(),
                     commit_sha,
                     files: vec![],
                 };
-                copy_files_to_config(&repo_path, &mut plugin);
+                crate::utils::copy_files_to_config(&repo_path, &mut plugin);
+
                 lock_file.add_plugin(plugin);
-                let lock_file_contents = toml::to_string(&lock_file).unwrap();
-                std::fs::write(
-                    &lock_file_path,
-                    AUTO_GENERATED_COMMENT.to_string() + &lock_file_contents,
-                )
-                .unwrap();
-                println!("Force install");
-            } else {
-                println!(
-                    "Plugin already exists: {}, Use --force to reinstall",
-                    repo_path.display()
-                );
+                lock_file.save(&lock_file_path);
             }
-        } else {
-            let source = crate::utils::format_git_url(&plugin_spec.repo);
-            let commit_sha = lock_file
-                .get_plugin(&source)
-                .map(|locked_plugin| locked_plugin.commit_sha.clone())
-                .unwrap_or_else(|| {
-                    let temp_repo = git2::Repository::clone(&source, &repo_path).unwrap();
-                    crate::utils::get_latest_commit_sha(temp_repo).unwrap()
-                });
-            let repo = git2::Repository::clone(&source, &repo_path).unwrap();
-            repo.set_head_detached(git2::Oid::from_str(&commit_sha).unwrap())
-                .unwrap();
-            let mut plugin = crate::models::Plugin {
-                name: plugin_spec.get_name(),
-                repo: plugin_spec.repo.to_string(),
-                source,
-                commit_sha: commit_sha.clone(),
-                files: vec![],
-            };
-            crate::utils::copy_files_to_config(&repo_path, &mut plugin);
-            lock_file.update_plugin(plugin);
         }
     }
-}
 
-fn load_or_initialize_lock_file(path: &PathBuf) -> LockFile {
-    if !path.exists() {
-        crate::lock_file::init()
-    } else {
-        crate::lock_file::load(path)
+    let ignored_lock_file_plugins = lock_file
+        .plugins
+        .iter()
+        .filter(|p| {
+            !plugin_specs
+                .iter()
+                .any(|spec| crate::git::format_git_url(&spec.repo) == p.source)
+        })
+        .collect::<Vec<&crate::models::Plugin>>();
+
+    if !ignored_lock_file_plugins.is_empty() {
+        println!("Notice: The following plugins are in pez-lock.toml but not in pez.toml:");
+        for plugin in ignored_lock_file_plugins {
+            println!("  - {}", plugin.name);
+        }
+        println!("If you want to remove them completely, please run:");
+        println!("  pez install --prune");
+        println!("or:");
+        println!("  pez prune");
     }
 }

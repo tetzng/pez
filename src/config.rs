@@ -23,6 +23,13 @@ pub(crate) fn load(path: &PathBuf) -> Config {
     toml::from_str(&content).unwrap()
 }
 
+impl Config {
+    pub(crate) fn save(&self, path: &PathBuf) {
+        let contents = toml::to_string(self).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+}
+
 impl PluginSpec {
     pub(crate) fn get_name(&self) -> String {
         if self.name.is_none() {

@@ -1,7 +1,5 @@
 use tabled::{Table, Tabled};
 
-use crate::cli::ListArgs;
-
 #[derive(Debug, Tabled)]
 struct PluginRow {
     name: String,
@@ -10,35 +8,70 @@ struct PluginRow {
     commit: String,
 }
 
-pub(crate) fn run(args: &ListArgs) {
-    if args.outdated {
-        list_outdated();
-    } else {
-        list();
-    }
+#[derive(Debug, Tabled)]
+struct PluginOutdatedRow {
+    name: String,
+    repo: String,
+    source: String,
+    current: String,
+    latest: String,
 }
 
-fn list() {
-    let lock_file_path = crate::utils::resolve_lock_file_path();
-    if lock_file_path.exists() {
-        let lock_file = crate::lock_file::load(&lock_file_path);
-        let plugins = lock_file
-            .plugins
-            .iter()
-            .map(|p| PluginRow {
-                name: p.get_name(),
-                repo: p.source.clone(),
-                source: p.source.clone(),
-                commit: p.commit_sha.clone(),
-            })
-            .collect::<Vec<PluginRow>>();
-        let table = Table::new(&plugins);
-        println!("{table}");
-    } else {
+pub(crate) fn run(args: &crate::cli::ListArgs) {
+    let lock_file_path = crate::utils::resolve_lock_file_dir().join("pez-lock.toml");
+    if !lock_file_path.exists() {
         println!("No plugins installed");
+        return;
+    }
+    let lock_file = crate::lock_file::load(&lock_file_path);
+
+    if args.outdated {
+        list_outdated(lock_file);
+    } else {
+        list(lock_file);
     }
 }
 
-fn list_outdated() {
-    println!("Listing outdated plugins");
+fn list(lock_file: crate::lock_file::LockFile) {
+    let plugins = lock_file
+        .plugins
+        .iter()
+        .map(|p| PluginRow {
+            name: p.get_name(),
+            repo: p.repo.clone(),
+            source: p.source.clone(),
+            commit: p.commit_sha[..7].to_string(),
+        })
+        .collect::<Vec<PluginRow>>();
+    let table = Table::new(&plugins);
+    println!("{table}");
+}
+
+fn list_outdated(lock_file: crate::lock_file::LockFile) {
+    let plugins = lock_file
+        .plugins
+        .iter()
+        .map(|p| PluginOutdatedRow {
+            name: p.get_name(),
+            repo: p.repo.clone(),
+            source: p.source.clone(),
+            current: p.commit_sha[..7].to_string(),
+            latest: fetch_latest_commit_sha(
+                git2::Repository::open(get_repo_path(&p.repo)).unwrap(),
+            )
+            .unwrap()[..7]
+                .to_string(),
+        })
+        .collect::<Vec<PluginOutdatedRow>>();
+    let table = Table::new(&plugins);
+    println!("{table}");
+}
+
+fn get_repo_path(plugin_repo: &str) -> std::path::PathBuf {
+    crate::utils::resolve_pez_data_dir().join(plugin_repo)
+}
+fn fetch_latest_commit_sha(repo: git2::Repository) -> Result<String, git2::Error> {
+    let fetch_head = repo.find_reference("FETCH_HEAD")?;
+    let commit = fetch_head.peel_to_commit()?;
+    Ok(commit.id().to_string())
 }

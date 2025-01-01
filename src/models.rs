@@ -45,7 +45,7 @@ impl std::str::FromStr for TargetDir {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct Plugin {
     pub(crate) name: String,
     pub(crate) repo: String,

@@ -1,12 +1,12 @@
 pub(crate) fn run() {
-    let pez_config_dir = crate::utils::resolve_pez_config_dir();
-    if !pez_config_dir.exists() {
-        std::fs::create_dir_all(&pez_config_dir).unwrap();
+    let config_dir = crate::utils::resolve_pez_config_dir();
+    if !config_dir.exists() {
+        std::fs::create_dir_all(&config_dir).unwrap();
     }
 
-    let pez_toml_path = pez_config_dir.join("pez.toml");
-    if pez_toml_path.exists() {
-        println!("{} already exists", pez_toml_path.display());
+    let config_path = config_dir.join("pez.toml");
+    if config_path.exists() {
+        println!("{} already exists", config_path.display());
         return;
     }
 
@@ -18,6 +18,6 @@ pub(crate) fn run() {
 
 # Add more plugins below by copying the [[plugins]] block.
 "#;
-    std::fs::write(&pez_toml_path, contents).unwrap();
-    println!("Created {}", pez_toml_path.display());
+    std::fs::write(&config_path, contents).unwrap();
+    println!("Created {}", config_path.display());
 }

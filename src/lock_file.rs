@@ -20,6 +20,11 @@ pub(crate) fn load(path: &PathBuf) -> LockFile {
 }
 
 impl LockFile {
+    pub(crate) fn save(&self, path: &PathBuf) {
+        let contents = toml::to_string(self).unwrap();
+        std::fs::write(path, AUTO_GENERATED_COMMENT.to_string() + &contents).unwrap();
+    }
+
     pub(crate) fn add_plugin(&mut self, plugin: crate::models::Plugin) {
         if self
             .plugins
