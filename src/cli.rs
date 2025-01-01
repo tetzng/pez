@@ -44,7 +44,12 @@ pub(crate) struct InstallArgs {
 #[derive(Args, Debug)]
 pub(crate) struct UninstallArgs {
     /// GitHub repo in the format <owner>/<repo>
+    #[arg(required = true)]
     pub(crate) plugins: Vec<String>,
+
+    /// Force uninstall even if the plugin data directory does not exist
+    #[arg(short, long)]
+    pub(crate) force: bool,
 }
 
 #[derive(Args, Debug)]
