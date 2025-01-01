@@ -35,7 +35,7 @@ impl LockFile {
                 "Plugin already exists: name={}, source={}",
                 plugin.name, plugin.source
             );
-            return;
+            std::process::exit(1);
         }
         self.plugins.push(plugin);
     }

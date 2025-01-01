@@ -16,7 +16,6 @@ pub(crate) fn clone_repository(
     clone_options.fetch_options(fetch_options);
     let repo = clone_options.clone(repo_url, target_path)?;
 
-    println!("Cloned repository into {}", target_path.display());
     Ok(repo)
 }
 

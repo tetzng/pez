@@ -1,18 +1,22 @@
 pub(crate) fn run(args: &crate::cli::InstallArgs) {
+    println!("🔍 Starting installation process...");
     if let Some(plugins) = &args.plugins {
         for plugin in plugins {
-            println!("Installing {}", &plugin);
+            println!("\n✨ Installing plugin: {plugin}");
             install(plugin, &args.force);
+            println!("✅ Successfully installed: {plugin}");
         }
     } else {
         install_from_lock_file(&args.force);
     }
+    println!("\n🎉 All specified plugins have been installed successfully!");
 }
 
 fn install(plugin_repo: &str, force: &bool) -> crate::models::Plugin {
     let parts = plugin_repo.split("/").collect::<Vec<&str>>();
     if parts.len() != 2 {
-        eprintln!("Invalid plugin format: {}", plugin_repo)
+        eprintln!("❌ Error: Invalid plugin format: {}", plugin_repo);
+        std::process::exit(1);
     }
     let name = parts[1].to_string();
     let source = &crate::git::format_git_url(plugin_repo);
@@ -50,11 +54,21 @@ fn install(plugin_repo: &str, force: &bool) -> crate::models::Plugin {
                 if *force {
                     std::fs::remove_dir_all(&repo_path).unwrap();
                 } else {
-                    eprintln!("Plugin already exists: {}, Use --force to reinstall", name)
+                    eprintln!(
+                        "❌ Error: Plugin already exists: {}, Use --force to reinstall",
+                        name
+                    );
+                    std::process::exit(1);
                 }
             }
 
+            println!(
+                "🔗 Cloning repository from {} to {}",
+                &source,
+                &repo_path.display()
+            );
             let repo = crate::git::clone_repository(source, &repo_path).unwrap();
+            println!("🔄 Checking out commit sha: {}", &locked_plugin.commit_sha);
             repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha).unwrap())
                 .unwrap();
             let mut plugin = crate::models::Plugin {
@@ -74,7 +88,11 @@ fn install(plugin_repo: &str, force: &bool) -> crate::models::Plugin {
                 if *force {
                     std::fs::remove_dir_all(&repo_path).unwrap();
                 } else {
-                    eprintln!("Plugin already exists: {}, Use --force to reinstall", name)
+                    eprintln!(
+                        "❌ Error: Plugin already exists: {}, Use --force to reinstall",
+                        name
+                    );
+                    std::process::exit(1);
                 }
             }
 
@@ -112,14 +130,22 @@ fn install_from_lock_file(force: &bool) {
         let source = crate::git::format_git_url(&plugin_spec.repo);
         let repo_path = crate::utils::resolve_pez_data_dir().join(&plugin_spec.repo);
 
+        println!("\n✨ Installing plugin: {}", &plugin_spec.repo);
         match lock_file.get_plugin(&source) {
             Some(locked_plugin) => {
                 if repo_path.exists() {
+                    println!("⏭️  Skipped: {} is already installed.", plugin_spec.repo);
+
                     continue;
                 }
-                println!("Installing {}", plugin_spec.repo);
 
+                println!(
+                    "🔗 Cloning repository from {} to {}",
+                    &source,
+                    &repo_path.display()
+                );
                 let repo = crate::git::clone_repository(&source, &repo_path).unwrap();
+                println!("🔄 Checking out commit sha: {}", &locked_plugin.commit_sha);
                 repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha).unwrap())
                     .unwrap();
                 let mut plugin = crate::models::Plugin {
@@ -139,9 +165,10 @@ fn install_from_lock_file(force: &bool) {
                         std::fs::remove_dir_all(&repo_path).unwrap();
                     } else {
                         eprintln!(
-                            "Plugin already exists: {}, Use --force to reinstall",
+                            "❌ Error: Plugin already exists: {}, Use --force to reinstall",
                             plugin_spec.repo
-                        )
+                        );
+                        std::process::exit(1);
                     }
                 }
 
@@ -175,7 +202,7 @@ fn install_from_lock_file(force: &bool) {
         .collect::<Vec<&crate::models::Plugin>>();
 
     if !ignored_lock_file_plugins.is_empty() {
-        println!("Notice: The following plugins are in pez-lock.toml but not in pez.toml:");
+        println!("\nNotice: The following plugins are in pez-lock.toml but not in pez.toml:");
         for plugin in ignored_lock_file_plugins {
             println!("  - {}", plugin.name);
         }

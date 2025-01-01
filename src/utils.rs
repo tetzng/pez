@@ -83,6 +83,7 @@ pub(crate) fn copy_files_to_config(
     let target_dirs = crate::models::TargetDir::all();
     let mut has_target_file = false;
 
+    println!("📂 Copying files:");
     for target_dir in target_dirs {
         let target_path = repo_path.join(target_dir.as_str());
         if !target_path.exists() {
@@ -104,8 +105,8 @@ pub(crate) fn copy_files_to_config(
             let file_name = file.file_name();
             let file_path = file.path();
             let dest_file_path = dest_path.join(&file_name);
+            println!("   - {}", dest_file_path.display());
             std::fs::copy(&file_path, &dest_file_path).unwrap();
-            println!("  {}", dest_file_path.display());
 
             let plugin_file = crate::models::PluginFile {
                 dir: target_dir.clone(),
