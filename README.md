@@ -52,10 +52,6 @@ pez install owner/package1
 pez install owner/package1 owner/package2
 ```
 
-```fish
-pez install
-```
-
 ### uninstall
 
 ```fish
