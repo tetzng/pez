@@ -10,6 +10,12 @@ Ensure you have Rust installed on your system. You can install pez using Cargo:
 cargo install pez
 ```
 
+## Completions
+
+```fish
+pez completions fish > ~/.config/fish/completions/pez.fish
+```
+
 ## Usage
 
 ```
