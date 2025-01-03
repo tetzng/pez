@@ -93,36 +93,6 @@ pez list --outdated
 
 ### prune
 
-````fish
-# Prune uninstalled plugins
-pez prune
-
-# prune uninstalled plugins
-### upgrade
-
-```fish
-# Upgrade all installed plugins
-pez upgrade
-
-# Upgrade a specific plugin
-pez upgrade owner/package1
-
-# Upgrade multiple plugins at once
-pez upgrade owner/package1 owner/package2
-````
-
-### list
-
-```fish
-# List all installed plugins
-pez list
-
-# List only outdated plugins
-pez list --outdated
-```
-
-### prune
-
 ```fish
 # Prune uninstalled plugins
 pez prune
