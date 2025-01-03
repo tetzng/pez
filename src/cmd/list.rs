@@ -28,11 +28,20 @@ pub(crate) fn run(args: &crate::cli::ListArgs) {
     if args.outdated {
         list_outdated(lock_file);
     } else {
-        list(lock_file);
+        match args.format {
+            Some(crate::cli::ListFormat::Table) => list_table(lock_file),
+            None => list(lock_file),
+        }
     }
 }
 
 fn list(lock_file: crate::lock_file::LockFile) {
+    for plugin in &lock_file.plugins {
+        println!("{}", plugin.repo,);
+    }
+}
+
+fn list_table(lock_file: crate::lock_file::LockFile) {
     let plugins = lock_file
         .plugins
         .iter()

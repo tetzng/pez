@@ -61,8 +61,12 @@ pub(crate) struct UpgradeArgs {
 
 #[derive(Args, Debug)]
 pub(crate) struct ListArgs {
+    // format
+    #[arg(long)]
+    pub(crate) format: Option<ListFormat>,
+
     /// Show only outdated plugins
-    #[arg(short, long)]
+    #[arg(long)]
     pub(crate) outdated: bool,
 }
 
@@ -79,4 +83,10 @@ pub(crate) struct PruneArgs {
     /// Confirm all prompts
     #[arg(short, long)]
     pub(crate) yes: bool,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub(crate) enum ListFormat {
+    Table,
+    // Json,
 }
