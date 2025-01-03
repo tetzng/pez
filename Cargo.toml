@@ -2,6 +2,12 @@
 name = "pez"
 version = "0.1.0"
 edition = "2021"
+description = "A Rust-based plugin manager for fish."
+readme = "README.md"
+repository = "https://github.com/tetzng/pez"
+license = "MIT"
+keywords = ["fish", "plugin", "manager"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4.5.23", features = ["derive"] }

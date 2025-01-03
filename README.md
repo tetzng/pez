@@ -1,6 +1,6 @@
 # pez
 
-A Modern Rust-Based Plugin Manager for fish
+A Rust-Based Plugin Manager for fish
 
 ## Installation
 
