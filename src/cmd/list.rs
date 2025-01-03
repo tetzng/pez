@@ -1,3 +1,4 @@
+use console::Emoji;
 use tabled::{Table, Tabled};
 
 #[derive(Debug, Tabled)]
@@ -23,10 +24,14 @@ pub(crate) fn run(args: &crate::cli::ListArgs) {
         println!("No plugins installed");
         return;
     }
+
     let lock_file = crate::lock_file::load(&lock_file_path);
 
     if args.outdated {
-        list_outdated(lock_file);
+        match args.format {
+            Some(crate::cli::ListFormat::Table) => list_outdated_table(lock_file),
+            None => list_outdated(lock_file),
+        }
     } else {
         match args.format {
             Some(crate::cli::ListFormat::Table) => list_table(lock_file),
@@ -57,19 +62,41 @@ fn list_table(lock_file: crate::lock_file::LockFile) {
 }
 
 fn list_outdated(lock_file: crate::lock_file::LockFile) {
+    let plugins = lock_file.plugins.iter().filter(|p| {
+        let repo_path = get_repo_path(&p.repo);
+        let repo = git2::Repository::open(&repo_path).unwrap();
+        let latest_remote_commit = crate::git::get_latest_remote_commit(&repo).unwrap();
+        p.commit_sha != latest_remote_commit
+    });
+    if plugins.clone().count() == 0 {
+        println!("{}All plugins are up to date!", Emoji("🎉 ", ""));
+        return;
+    }
+    plugins.for_each(|p| {
+        println!("{}", p.repo);
+    });
+}
+
+fn list_outdated_table(lock_file: crate::lock_file::LockFile) {
     let plugins = lock_file
         .plugins
         .iter()
+        .filter(|p| {
+            let repo_path = get_repo_path(&p.repo);
+            let repo = git2::Repository::open(&repo_path).unwrap();
+            let latest_remote_commit = crate::git::get_latest_remote_commit(&repo).unwrap();
+            p.commit_sha != latest_remote_commit
+        })
         .map(|p| PluginOutdatedRow {
             name: p.get_name(),
             repo: p.repo.clone(),
             source: p.source.clone(),
             current: p.commit_sha[..7].to_string(),
-            latest: fetch_latest_commit_sha(
-                git2::Repository::open(get_repo_path(&p.repo)).unwrap(),
-            )
-            .unwrap()[..7]
-                .to_string(),
+            latest: {
+                let repo_path = get_repo_path(&p.repo);
+                let repo = git2::Repository::open(&repo_path).unwrap();
+                crate::git::get_latest_remote_commit(&repo).unwrap()[..7].to_string()
+            },
         })
         .collect::<Vec<PluginOutdatedRow>>();
     let table = Table::new(&plugins);
@@ -78,9 +105,4 @@ fn list_outdated(lock_file: crate::lock_file::LockFile) {
 
 fn get_repo_path(plugin_repo: &str) -> std::path::PathBuf {
     crate::utils::resolve_pez_data_dir().join(plugin_repo)
-}
-fn fetch_latest_commit_sha(repo: git2::Repository) -> Result<String, git2::Error> {
-    let fetch_head = repo.find_reference("FETCH_HEAD")?;
-    let commit = fetch_head.peel_to_commit()?;
-    Ok(commit.id().to_string())
 }
