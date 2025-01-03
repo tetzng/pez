@@ -70,4 +70,12 @@ pub(crate) struct PruneArgs {
     /// Force prune even if the plugin data directory does not exist
     #[arg(short, long)]
     pub(crate) force: bool,
+
+    /// Dry run without actually removing any files
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+
+    /// Confirm all prompts
+    #[arg(short, long)]
+    pub(crate) yes: bool,
 }
