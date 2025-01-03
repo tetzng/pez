@@ -77,7 +77,7 @@ pub(crate) fn ensure_lock_file() -> (crate::lock_file::LockFile, PathBuf) {
 
 pub(crate) fn copy_files_to_config(
     repo_path: &std::path::Path,
-    plugin: &mut crate::models::Plugin,
+    plugin: &mut crate::lock_file::Plugin,
 ) {
     let config_dir = resolve_fish_config_dir();
     let target_dirs = crate::models::TargetDir::all();
@@ -108,7 +108,7 @@ pub(crate) fn copy_files_to_config(
             println!("   - {}", dest_file_path.display());
             std::fs::copy(&file_path, &dest_file_path).unwrap();
 
-            let plugin_file = crate::models::PluginFile {
+            let plugin_file = crate::lock_file::PluginFile {
                 dir: target_dir.clone(),
                 name: file_name.to_string_lossy().to_string(),
             };

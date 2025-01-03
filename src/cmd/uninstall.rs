@@ -18,7 +18,6 @@ pub(crate) fn uninstall(plugin_repo: &str, force: bool) {
         eprintln!("❌ Error: Invalid plugin format: {}", plugin_repo);
         std::process::exit(1);
     }
-    let name = parts[1].to_string();
     let source = &crate::git::format_git_url(plugin_repo);
     let config_dir = crate::utils::resolve_fish_config_dir();
 

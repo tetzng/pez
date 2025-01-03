@@ -44,29 +44,3 @@ impl std::str::FromStr for TargetDir {
         }
     }
 }
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct Plugin {
-    pub(crate) name: String,
-    pub(crate) repo: String,
-    pub(crate) source: String,
-    pub(crate) commit_sha: String,
-    pub(crate) files: Vec<PluginFile>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub(crate) struct PluginFile {
-    pub(crate) dir: TargetDir,
-    pub(crate) name: String,
-}
-
-impl Plugin {
-    pub(crate) fn get_name(&self) -> String {
-        if self.name.is_empty() {
-            let parts: Vec<&str> = self.source.split("/").collect();
-            parts[parts.len() - 1].to_owned()
-        } else {
-            self.name.clone()
-        }
-    }
-}

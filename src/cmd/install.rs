@@ -12,7 +12,7 @@ pub(crate) fn run(args: &crate::cli::InstallArgs) {
     println!("\n🎉 All specified plugins have been installed successfully!");
 }
 
-fn install(plugin_repo: &str, force: &bool) -> crate::models::Plugin {
+fn install(plugin_repo: &str, force: &bool) -> crate::lock_file::Plugin {
     let parts = plugin_repo.split("/").collect::<Vec<&str>>();
     if parts.len() != 2 {
         eprintln!("❌ Error: Invalid plugin format: {}", plugin_repo);
@@ -71,7 +71,7 @@ fn install(plugin_repo: &str, force: &bool) -> crate::models::Plugin {
             println!("🔄 Checking out commit sha: {}", &locked_plugin.commit_sha);
             repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha).unwrap())
                 .unwrap();
-            let mut plugin = crate::models::Plugin {
+            let mut plugin = crate::lock_file::Plugin {
                 name: name.to_string(),
                 repo: plugin_repo.to_string(),
                 source: source.to_string(),
@@ -98,7 +98,7 @@ fn install(plugin_repo: &str, force: &bool) -> crate::models::Plugin {
 
             let repo = git2::Repository::clone(source, &repo_path).unwrap();
             let commit_sha = crate::git::get_latest_commit_sha(repo).unwrap();
-            let mut plugin = crate::models::Plugin {
+            let mut plugin = crate::lock_file::Plugin {
                 name: name.to_string(),
                 repo: plugin_repo.to_string(),
                 source: source.to_string(),
@@ -148,7 +148,7 @@ fn install_from_lock_file(force: &bool) {
                 println!("🔄 Checking out commit sha: {}", &locked_plugin.commit_sha);
                 repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha).unwrap())
                     .unwrap();
-                let mut plugin = crate::models::Plugin {
+                let mut plugin = crate::lock_file::Plugin {
                     name: plugin_spec.get_name(),
                     repo: plugin_spec.repo.clone(),
                     source: source.to_string(),
@@ -176,7 +176,7 @@ fn install_from_lock_file(force: &bool) {
 
                 let repo = git2::Repository::clone(&source, &repo_path).unwrap();
                 let commit_sha = crate::git::get_latest_commit_sha(repo).unwrap();
-                let mut plugin = crate::models::Plugin {
+                let mut plugin = crate::lock_file::Plugin {
                     name: plugin_spec.get_name(),
                     repo: plugin_spec.repo.clone(),
                     source: source.to_string(),
@@ -199,7 +199,7 @@ fn install_from_lock_file(force: &bool) {
                 .iter()
                 .any(|spec| crate::git::format_git_url(&spec.repo) == p.source)
         })
-        .collect::<Vec<&crate::models::Plugin>>();
+        .collect::<Vec<&crate::lock_file::Plugin>>();
 
     if !ignored_lock_file_plugins.is_empty() {
         println!("\nNotice: The following plugins are in pez-lock.toml but not in pez.toml:");
