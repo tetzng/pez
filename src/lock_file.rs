@@ -1,5 +1,5 @@
 use serde_derive::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct LockFile {
@@ -80,5 +80,11 @@ impl Plugin {
         } else {
             self.name.clone()
         }
+    }
+}
+
+impl PluginFile {
+    pub(crate) fn get_path(&self, config_dir: &Path) -> PathBuf {
+        config_dir.join(self.dir.as_str()).join(&self.name)
     }
 }

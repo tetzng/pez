@@ -34,8 +34,8 @@ fn main() {
         cli::Commands::List(args) => {
             crate::cmd::list::run(args);
         }
-        cli::Commands::Prune => {
-            crate::cmd::prune::run();
+        cli::Commands::Prune(args) => {
+            crate::cmd::prune::run(args);
         }
     }
 }

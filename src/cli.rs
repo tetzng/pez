@@ -25,7 +25,7 @@ pub(crate) enum Commands {
     List(ListArgs),
 
     /// Prune uninstalled plugins
-    Prune,
+    Prune(PruneArgs),
 }
 
 #[derive(Args, Debug)]
@@ -63,4 +63,11 @@ pub(crate) struct ListArgs {
     /// Show only outdated plugins
     #[arg(short, long)]
     pub(crate) outdated: bool,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct PruneArgs {
+    /// Force prune even if the plugin data directory does not exist
+    #[arg(short, long)]
+    pub(crate) force: bool,
 }
