@@ -34,16 +34,13 @@ fn upgrade(plugin: &str) {
         );
         std::process::exit(1);
     }
-    let source = &crate::git::format_git_url(plugin);
-    let (mut lock_file, _) = crate::utils::ensure_lock_file();
-    let config_dir = crate::utils::resolve_fish_config_dir();
     let (mut config, config_path) = crate::utils::ensure_config();
 
     match config.plugins {
         Some(ref mut plugin_specs) => {
             if !plugin_specs.iter().any(|p| p.repo == plugin) {
                 plugin_specs.push(crate::config::PluginSpec {
-                    repo: plugin.to_string(),
+                    repo: plugin.to_string().clone(),
                     name: None,
                     source: None,
                 });
@@ -60,6 +57,24 @@ fn upgrade(plugin: &str) {
         }
     }
 
+    upgrade_plugin(plugin);
+}
+
+fn upgrade_all() {
+    let (config, _) = crate::utils::ensure_config();
+    if let Some(plugins) = &config.plugins {
+        for plugin in plugins {
+            println!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &plugin.repo);
+            upgrade_plugin(&plugin.repo);
+        }
+    }
+}
+
+fn upgrade_plugin(plugin_repo: &str) {
+    let (mut lock_file, lock_file_path) = crate::utils::ensure_lock_file();
+    let source = &crate::git::format_git_url(plugin_repo);
+    let config_dir = crate::utils::resolve_fish_config_dir();
+
     match lock_file.get_plugin(source) {
         Some(lock_file_plugin) => {
             let repo_path = crate::utils::resolve_pez_data_dir().join(&lock_file_plugin.repo);
@@ -71,7 +86,7 @@ fn upgrade(plugin: &str) {
                         "{}{} Plugin {} is already up to date.",
                         Emoji("🚀 ", ""),
                         console::style("Info:").cyan(),
-                        plugin
+                        plugin_repo
                     );
                     return;
                 }
@@ -87,15 +102,17 @@ fn upgrade(plugin: &str) {
                 });
                 let mut updated_plugin = crate::lock_file::Plugin {
                     name: lock_file_plugin.name.to_string(),
-                    repo: plugin.to_string(),
+                    repo: plugin_repo.to_string(),
                     source: source.to_string(),
                     commit_sha: latest_remote_commit,
                     files: vec![],
                 };
+                println!("{:?}", updated_plugin);
 
                 crate::utils::copy_files_to_config(&repo_path, &mut updated_plugin);
 
                 lock_file.update_plugin(updated_plugin);
+                lock_file.save(&lock_file_path);
             } else {
                 println!(
                     "{}{} Repository directory at {} does not exist.",
@@ -103,6 +120,7 @@ fn upgrade(plugin: &str) {
                     console::style("Warning:").yellow(),
                     &repo_path.display()
                 );
+                println!("{}You need to install the plugin first.", Emoji("🚧 ", ""),);
             }
         }
         None => {
@@ -110,13 +128,9 @@ fn upgrade(plugin: &str) {
                 "{}{} Plugin {} is not installed.",
                 Emoji("❌ ", ""),
                 console::style("Error:").red().bold(),
-                plugin
+                plugin_repo
             );
             std::process::exit(1);
         }
     }
-}
-
-fn upgrade_all() {
-    println!("Upgrading all plugins");
 }
