@@ -16,8 +16,9 @@ pub(crate) fn uninstall(plugin_repo: &str, force: bool) {
     let parts = plugin_repo.split("/").collect::<Vec<&str>>();
     if parts.len() != 2 {
         eprintln!(
-            "{}Error: Invalid plugin format: {}",
+            "{}{} Invalid plugin format: {}",
             Emoji("❌ ", ""),
+            console::style("Error:").red().bold(),
             plugin_repo
         );
         std::process::exit(1);
@@ -48,8 +49,8 @@ pub(crate) fn uninstall(plugin_repo: &str, force: bool) {
                         let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
                         println!("   - {}", dest_path.display());
                     });
-                    println!("If you want to remove these files, use the --force flag.");
-                    return;
+                    eprintln!("If you want to remove these files, use the --force flag.");
+                    std::process::exit(1);
                 }
             }
 
@@ -74,8 +75,9 @@ pub(crate) fn uninstall(plugin_repo: &str, force: bool) {
         }
         None => {
             eprintln!(
-                "{}Error: Plugin {} is not installed.",
+                "{}{} Plugin {} is not installed.",
                 Emoji("❌ ", ""),
+                console::style("Error:").red().bold(),
                 plugin_repo
             );
             std::process::exit(1);

@@ -6,8 +6,8 @@ pub(crate) fn run() {
 
     let config_path = config_dir.join("pez.toml");
     if config_path.exists() {
-        println!("{} already exists", config_path.display());
-        return;
+        eprintln!("{} already exists", config_path.display());
+        std::process::exit(1);
     }
 
     let contents = r#"# This file defines the plugins to be installed by pez.

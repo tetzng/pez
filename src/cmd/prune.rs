@@ -67,8 +67,8 @@ fn prune(force: bool, yes: bool) {
             let mut input = String::new();
             std::io::stdin().read_line(&mut input).unwrap();
             if input.trim().to_lowercase() != "y" {
-                println!("{}Aborted.", Emoji("🚧 ", ""));
-                return;
+                eprintln!("{}Aborted.", Emoji("🚧 ", ""));
+                std::process::exit(1);
             }
         }
     }
