@@ -1,5 +1,7 @@
 use console::Emoji;
 
+use crate::lock_file::Plugin;
+
 pub(crate) fn run(args: &crate::cli::InstallArgs) {
     println!("{}Starting installation process...", Emoji("🔍 ", ""));
     if let Some(plugins) = &args.plugins {
@@ -9,7 +11,7 @@ pub(crate) fn run(args: &crate::cli::InstallArgs) {
             println!("{}Successfully installed: {plugin}", Emoji("✅ ", ""));
         }
     } else {
-        install_from_lock_file(&args.force);
+        install_from_lock_file(&args.force, &args.prune);
     }
     println!(
         "\n{}All specified plugins have been installed successfully!",
@@ -133,7 +135,7 @@ fn install(plugin_repo: &str, force: &bool) -> crate::lock_file::Plugin {
     }
 }
 
-fn install_from_lock_file(force: &bool) {
+fn install_from_lock_file(force: &bool, prune: &bool) {
     let (mut lock_file, lock_file_path) = crate::utils::ensure_lock_file();
     let (config, _) = crate::utils::ensure_config();
 
@@ -233,16 +235,64 @@ fn install_from_lock_file(force: &bool) {
                 .iter()
                 .any(|spec| crate::git::format_git_url(&spec.repo) == p.source)
         })
-        .collect::<Vec<&crate::lock_file::Plugin>>();
+        .cloned()
+        .collect::<Vec<Plugin>>();
 
     if !ignored_lock_file_plugins.is_empty() {
-        println!("\nNotice: The following plugins are in pez-lock.toml but not in pez.toml:");
-        for plugin in ignored_lock_file_plugins {
-            println!("  - {}", plugin.name);
+        if *prune {
+            for plugin in ignored_lock_file_plugins {
+                println!("\n{}Removing plugin: {}", Emoji("🐟 ", ""), &plugin.name);
+                let repo_path = crate::utils::resolve_pez_data_dir().join(&plugin.repo);
+                if repo_path.exists() {
+                    std::fs::remove_dir_all(&repo_path).unwrap();
+                } else {
+                    println!(
+                        "{}Repository directory at {} does not exist.",
+                        Emoji("🚧 ", ""),
+                        &repo_path.display()
+                    );
+
+                    if !force {
+                        println!(
+                            "{}Detected plugin files based on pez-lock.toml:",
+                            Emoji("📄 ", ""),
+                        );
+                        plugin.files.iter().for_each(|file| {
+                            let dest_path = crate::utils::resolve_fish_config_dir()
+                                .join(file.dir.as_str())
+                                .join(&file.name);
+                            println!("   - {}", dest_path.display());
+                        });
+                        println!("If you want to remove these files, use the --force flag.");
+                        continue;
+                    }
+                }
+
+                println!(
+                    "{}Removing plugin files based on pez-lock.toml:",
+                    Emoji("🗑️  ", ""),
+                );
+                plugin.files.iter().for_each(|file| {
+                    let dest_path = crate::utils::resolve_fish_config_dir()
+                        .join(file.dir.as_str())
+                        .join(&file.name);
+                    if dest_path.exists() {
+                        println!("   - {}", &dest_path.display());
+                        std::fs::remove_file(&dest_path).unwrap();
+                    }
+                    lock_file.remove_plugin(&plugin.source);
+                    lock_file.save(&lock_file_path);
+                });
+            }
+        } else {
+            println!("\nNotice: The following plugins are in pez-lock.toml but not in pez.toml:");
+            for plugin in ignored_lock_file_plugins {
+                println!("  - {}", plugin.name);
+            }
+            println!("If you want to remove them completely, please run:");
+            println!("  pez install --prune");
+            println!("or:");
+            println!("  pez prune");
         }
-        println!("If you want to remove them completely, please run:");
-        println!("  pez install --prune");
-        println!("or:");
-        println!("  pez prune");
     }
 }

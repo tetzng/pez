@@ -36,9 +36,10 @@ pub(crate) struct InstallArgs {
     /// Force install even if the plugin is already installed
     #[arg(short, long)]
     pub(crate) force: bool,
+
     // /// Prune uninstalled plugins
-    // #[arg(short, long)]
-    // pub(crate) prune: bool,
+    #[arg(short, long, conflicts_with = "plugins")]
+    pub(crate) prune: bool,
 }
 
 #[derive(Args, Debug)]
