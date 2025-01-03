@@ -2,11 +2,6 @@ use console::Emoji;
 
 pub(crate) fn run(args: &crate::cli::UninstallArgs) {
     println!("{}Starting uninstallation process...", Emoji("🔍 ", ""));
-    if args.plugins.is_empty() {
-        eprintln!("{}Error: No plugins specified", Emoji("❌ ", ""));
-        std::process::exit(1);
-    }
-
     for plugin in &args.plugins {
         println!("\n{}Uninstalling plugin: {}", Emoji("✨ ", ""), plugin);
         uninstall(plugin, args.force);
