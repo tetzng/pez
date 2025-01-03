@@ -1,21 +1,30 @@
+use console::Emoji;
+
 pub(crate) fn run(args: &crate::cli::UninstallArgs) {
-    println!("🔍 Starting uninstallation process...");
+    println!("{}Starting uninstallation process...", Emoji("🔍 ", ""));
     if args.plugins.is_empty() {
-        eprintln!("❌ Error: No plugins specified");
+        eprintln!("{}Error: No plugins specified", Emoji("❌ ", ""));
         std::process::exit(1);
     }
 
     for plugin in &args.plugins {
-        println!("\n✨ Uninstalling plugin: {}", plugin);
+        println!("\n{}Uninstalling plugin: {}", Emoji("✨ ", ""), plugin);
         uninstall(plugin, args.force);
     }
-    println!("\n🎉 All specified plugins have been uninstalled successfully!");
+    println!(
+        "\n{}All specified plugins have been uninstalled successfully!",
+        Emoji("🎉 ", "")
+    );
 }
 
 pub(crate) fn uninstall(plugin_repo: &str, force: bool) {
     let parts = plugin_repo.split("/").collect::<Vec<&str>>();
     if parts.len() != 2 {
-        eprintln!("❌ Error: Invalid plugin format: {}", plugin_repo);
+        eprintln!(
+            "{}Error: Invalid plugin format: {}",
+            Emoji("❌ ", ""),
+            plugin_repo
+        );
         std::process::exit(1);
     }
     let source = &crate::git::format_git_url(plugin_repo);
@@ -30,11 +39,16 @@ pub(crate) fn uninstall(plugin_repo: &str, force: bool) {
                 std::fs::remove_dir_all(&repo_path).unwrap();
             } else {
                 println!(
-                    "🚧 Warning: Repository directory at {} does not exist.",
+                    "{}{} Repository directory at {} does not exist.",
+                    Emoji("🚧 ", ""),
+                    console::style("Warning:").yellow(),
                     &repo_path.display()
                 );
                 if !force {
-                    println!("📄 Detected plugin files based on pez-lock.toml:");
+                    println!(
+                        "{}Detected plugin files based on pez-lock.toml:",
+                        Emoji("📄 ", ""),
+                    );
                     locked_plugin.files.iter().for_each(|file| {
                         let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
                         println!("   - {}", dest_path.display());
@@ -44,7 +58,10 @@ pub(crate) fn uninstall(plugin_repo: &str, force: bool) {
                 }
             }
 
-            println!("🗑️ Removing plugin files based on pez-lock.toml:");
+            println!(
+                "{}Removing plugin files based on pez-lock.toml:",
+                Emoji("🗑️  ", ""),
+            );
             locked_plugin.files.iter().for_each(|file| {
                 let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
                 if dest_path.exists() {
@@ -61,9 +78,17 @@ pub(crate) fn uninstall(plugin_repo: &str, force: bool) {
             }
         }
         None => {
-            eprintln!("❌ Error: Plugin {} is not installed.", plugin_repo);
+            eprintln!(
+                "{}Error: Plugin {} is not installed.",
+                Emoji("❌ ", ""),
+                plugin_repo
+            );
             std::process::exit(1);
         }
     }
-    println!("✅ Successfully uninstalled: {}", plugin_repo);
+    println!(
+        "{}Successfully uninstalled: {}",
+        Emoji("✅ ", ""),
+        plugin_repo
+    );
 }

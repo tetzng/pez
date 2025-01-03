@@ -1,21 +1,31 @@
+use console::Emoji;
+
 pub(crate) fn run(args: &crate::cli::InstallArgs) {
-    println!("🔍 Starting installation process...");
+    println!("{}Starting installation process...", Emoji("🔍 ", ""));
     if let Some(plugins) = &args.plugins {
         for plugin in plugins {
-            println!("\n✨ Installing plugin: {plugin}");
+            println!("\n{}Installing plugin: {plugin}", Emoji("✨ ", ""));
             install(plugin, &args.force);
-            println!("✅ Successfully installed: {plugin}");
+            println!("{}Successfully installed: {plugin}", Emoji("✅ ", ""));
         }
     } else {
         install_from_lock_file(&args.force);
     }
-    println!("\n🎉 All specified plugins have been installed successfully!");
+    println!(
+        "\n{}All specified plugins have been installed successfully!",
+        Emoji("🎉 ", "")
+    );
 }
 
 fn install(plugin_repo: &str, force: &bool) -> crate::lock_file::Plugin {
     let parts = plugin_repo.split("/").collect::<Vec<&str>>();
     if parts.len() != 2 {
-        eprintln!("❌ Error: Invalid plugin format: {}", plugin_repo);
+        eprintln!(
+            "{}{} Invalid plugin format: {}",
+            Emoji("❌ ", ""),
+            console::style("Error:").red().bold(),
+            plugin_repo
+        );
         std::process::exit(1);
     }
     let name = parts[1].to_string();
@@ -55,7 +65,9 @@ fn install(plugin_repo: &str, force: &bool) -> crate::lock_file::Plugin {
                     std::fs::remove_dir_all(&repo_path).unwrap();
                 } else {
                     eprintln!(
-                        "❌ Error: Plugin already exists: {}, Use --force to reinstall",
+                        "{}{} Plugin already exists: {}, Use --force to reinstall",
+                        Emoji("❌ ", ""),
+                        console::style("Error:").red().bold(),
                         name
                     );
                     std::process::exit(1);
@@ -63,12 +75,17 @@ fn install(plugin_repo: &str, force: &bool) -> crate::lock_file::Plugin {
             }
 
             println!(
-                "🔗 Cloning repository from {} to {}",
+                "{}Cloning repository from {} to {}",
+                Emoji("🔗 ", ""),
                 &source,
                 &repo_path.display()
             );
             let repo = crate::git::clone_repository(source, &repo_path).unwrap();
-            println!("🔄 Checking out commit sha: {}", &locked_plugin.commit_sha);
+            println!(
+                "{}Checking out commit sha: {}",
+                Emoji("🔄 ", ""),
+                &locked_plugin.commit_sha
+            );
             repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha).unwrap())
                 .unwrap();
             let mut plugin = crate::lock_file::Plugin {
@@ -89,7 +106,9 @@ fn install(plugin_repo: &str, force: &bool) -> crate::lock_file::Plugin {
                     std::fs::remove_dir_all(&repo_path).unwrap();
                 } else {
                     eprintln!(
-                        "❌ Error: Plugin already exists: {}, Use --force to reinstall",
+                        "{}{} Plugin already exists: {}, Use --force to reinstall",
+                        Emoji("❌ ", ""),
+                        console::style("Error:").red().bold(),
                         name
                     );
                     std::process::exit(1);
@@ -130,22 +149,35 @@ fn install_from_lock_file(force: &bool) {
         let source = crate::git::format_git_url(&plugin_spec.repo);
         let repo_path = crate::utils::resolve_pez_data_dir().join(&plugin_spec.repo);
 
-        println!("\n✨ Installing plugin: {}", &plugin_spec.repo);
+        println!(
+            "\n{}Installing plugin: {}",
+            Emoji("✨ ", ""),
+            &plugin_spec.repo
+        );
         match lock_file.get_plugin(&source) {
             Some(locked_plugin) => {
                 if repo_path.exists() {
-                    println!("⏭️  Skipped: {} is already installed.", plugin_spec.repo);
+                    println!(
+                        "{}Skipped: {} is already installed.",
+                        Emoji("⏭️  ", ""),
+                        plugin_spec.repo
+                    );
 
                     continue;
                 }
 
                 println!(
-                    "🔗 Cloning repository from {} to {}",
+                    "{}Cloning repository from {} to {}",
+                    Emoji("🔗 ", ""),
                     &source,
                     &repo_path.display()
                 );
                 let repo = crate::git::clone_repository(&source, &repo_path).unwrap();
-                println!("🔄 Checking out commit sha: {}", &locked_plugin.commit_sha);
+                println!(
+                    "{}Checking out commit sha: {}",
+                    Emoji("🔄 ", ""),
+                    &locked_plugin.commit_sha
+                );
                 repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha).unwrap())
                     .unwrap();
                 let mut plugin = crate::lock_file::Plugin {
@@ -165,7 +197,9 @@ fn install_from_lock_file(force: &bool) {
                         std::fs::remove_dir_all(&repo_path).unwrap();
                     } else {
                         eprintln!(
-                            "❌ Error: Plugin already exists: {}, Use --force to reinstall",
+                            "{}{} Plugin already exists: {}, Use --force to reinstall",
+                            Emoji("❌ ", ""),
+                            console::style("Error:").red().bold(),
                             plugin_spec.repo
                         );
                         std::process::exit(1);

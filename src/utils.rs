@@ -1,5 +1,7 @@
 use std::{env, path::PathBuf};
 
+use console::Emoji;
+
 pub(crate) fn resolve_fish_config_dir() -> PathBuf {
     if let Some(dir) = env::var_os("__fish_config_dir") {
         return PathBuf::from(dir);
@@ -83,7 +85,7 @@ pub(crate) fn copy_files_to_config(
     let target_dirs = crate::models::TargetDir::all();
     let mut has_target_file = false;
 
-    println!("📂 Copying files:");
+    println!("{}Copying files:", Emoji("📂 ", ""));
     for target_dir in target_dirs {
         let target_path = repo_path.join(target_dir.as_str());
         if !target_path.exists() {
@@ -116,7 +118,10 @@ pub(crate) fn copy_files_to_config(
         }
     }
     if !has_target_file {
-        println!("Warning: No valid files found in the repository.");
+        println!(
+            "{} No valid files found in the repository.",
+            console::style("Warning:").yellow()
+        );
         println!("Ensure that it contains at least one file in 'functions', 'completions', 'conf.d', or 'themes'.");
     }
 }
