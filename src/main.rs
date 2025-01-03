@@ -37,5 +37,8 @@ fn main() {
         cli::Commands::Prune(args) => {
             crate::cmd::prune::run(args);
         }
+        cli::Commands::Completions { shell } => match shell {
+            cli::ShellType::Fish => cli::generate_completion(clap_complete::aot::Fish),
+        },
     }
 }

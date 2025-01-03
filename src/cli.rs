@@ -1,4 +1,5 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Generator};
 
 #[derive(Parser, Debug)]
 #[command(name = "pez", version, about, long_about = None)]
@@ -26,6 +27,12 @@ pub(crate) enum Commands {
 
     /// Prune uninstalled plugins
     Prune(PruneArgs),
+
+    /// Generate shell completion scripts
+    Completions {
+        #[arg(value_enum)]
+        shell: ShellType,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -89,4 +96,14 @@ pub(crate) struct PruneArgs {
 pub(crate) enum ListFormat {
     Table,
     // Json,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub(crate) enum ShellType {
+    Fish,
+}
+
+pub(crate) fn generate_completion<G: Generator>(gen: G) {
+    let mut cmd = Cli::command();
+    generate(gen, &mut cmd, "pez", &mut std::io::stdout());
 }
