@@ -1,3 +1,6 @@
+> [!WARNING]
+> This project is still in development and may not be stable. Use at your own risk.
+
 # pez
 
 A Rust-Based Plugin Manager for fish
@@ -28,6 +31,7 @@ Commands:
   upgrade    Upgrade installed fish plugin(s)
   list       List installed fish plugins
   prune      Prune uninstalled plugins
+  completions  Generate shell completion scripts
   help       Print this message or the help of the given subcommand(s)
 
 Options:
