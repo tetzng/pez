@@ -7,6 +7,7 @@ mod lock_file;
 mod models;
 mod utils;
 pub mod cmd {
+    pub mod completion;
     pub mod init;
     pub mod install;
     pub mod list;
@@ -38,7 +39,9 @@ fn main() {
             crate::cmd::prune::run(args);
         }
         cli::Commands::Completions { shell } => match shell {
-            cli::ShellType::Fish => cli::generate_completion(clap_complete::aot::Fish),
+            cli::ShellType::Fish => {
+                crate::cmd::completion::generate_completion(clap_complete::aot::Fish)
+            }
         },
     }
 }
