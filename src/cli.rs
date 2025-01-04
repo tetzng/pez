@@ -43,7 +43,7 @@ pub(crate) struct InstallArgs {
     #[arg(short, long)]
     pub(crate) force: bool,
 
-    // /// Prune uninstalled plugins
+    /// Prune uninstalled plugins
     #[arg(short, long, conflicts_with = "plugins")]
     pub(crate) prune: bool,
 }
@@ -67,8 +67,8 @@ pub(crate) struct UpgradeArgs {
 
 #[derive(Args, Debug)]
 pub(crate) struct ListArgs {
-    // format
-    #[arg(long)]
+    /// List format
+    #[arg(long, value_enum)]
     pub(crate) format: Option<ListFormat>,
 
     /// Show only outdated plugins

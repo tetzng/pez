@@ -26,6 +26,10 @@ pub(crate) fn run(args: &crate::cli::ListArgs) {
     }
 
     let lock_file = crate::lock_file::load(&lock_file_path);
+    if lock_file.plugins.is_empty() {
+        println!("No plugins installed");
+        return;
+    }
 
     if args.outdated {
         match args.format {
