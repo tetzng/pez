@@ -1,7 +1,7 @@
 use serde_derive::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct LockFile {
     pub(crate) version: u32,
     pub(crate) plugins: Vec<Plugin>,
@@ -51,6 +51,17 @@ impl LockFile {
     pub(crate) fn update_plugin(&mut self, plugin: Plugin) {
         self.remove_plugin(&plugin.source);
         self.add_plugin(plugin);
+    }
+
+    pub(crate) fn merge_plugins(&mut self, new_plugins: Vec<Plugin>) {
+        for new_plugin in new_plugins {
+            let source = new_plugin.source.clone();
+            if let Some(plugin) = self.plugins.iter_mut().find(|p| p.source == source) {
+                *plugin = new_plugin;
+            } else {
+                self.plugins.push(new_plugin);
+            }
+        }
     }
 }
 

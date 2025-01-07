@@ -16,7 +16,8 @@ pub mod cmd {
     pub mod upgrade;
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = cli::Cli::parse();
 
     match &cli.command {
@@ -24,7 +25,7 @@ fn main() {
             crate::cmd::init::run();
         }
         cli::Commands::Install(args) => {
-            crate::cmd::install::run(args);
+            crate::cmd::install::run(args).await;
         }
         cli::Commands::Uninstall(args) => {
             crate::cmd::uninstall::run(args);

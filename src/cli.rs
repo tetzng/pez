@@ -1,4 +1,7 @@
+use std::fmt;
+
 use clap::{Args, Parser, Subcommand};
+use regex::Regex;
 
 #[derive(Parser, Debug)]
 #[command(name = "pez", version, about, long_about = None)]
@@ -37,7 +40,7 @@ pub(crate) enum Commands {
 #[derive(Args, Debug)]
 pub(crate) struct InstallArgs {
     /// GitHub repo in the format <owner>/<repo>
-    pub(crate) plugins: Option<Vec<String>>,
+    pub(crate) plugins: Option<Vec<PluginRepo>>,
 
     /// Force install even if the plugin is already installed
     #[arg(short, long)]
@@ -51,7 +54,8 @@ pub(crate) struct InstallArgs {
 #[derive(Args, Debug)]
 pub(crate) struct UninstallArgs {
     /// GitHub repo in the format <owner>/<repo>
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = validate_plugin_format
+    )]
     pub(crate) plugins: Vec<String>,
 
     /// Force uninstall even if the plugin data directory does not exist
@@ -62,6 +66,7 @@ pub(crate) struct UninstallArgs {
 #[derive(Args, Debug)]
 pub(crate) struct UpgradeArgs {
     /// GitHub repo in the format <owner>/<repo>
+    #[arg(value_parser = validate_plugin_format)]
     pub(crate) plugins: Option<Vec<String>>,
 }
 
@@ -94,10 +99,59 @@ pub(crate) struct PruneArgs {
 #[derive(Debug, Clone, clap::ValueEnum)]
 pub(crate) enum ListFormat {
     Table,
-    // Json,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub(crate) enum ShellType {
     Fish,
+}
+
+fn validate_plugin_format(repo: &str) -> Result<String, String> {
+    let re = Regex::new(r"^[a-zA-Z0-9-]+/[a-zA-Z0-9_.-]+$").unwrap();
+    if re.is_match(repo) && !repo.ends_with('.') {
+        Ok(repo.to_string())
+    } else {
+        Err(format!(
+            "Invalid format: {}. Expected format: <owner>/<repo>",
+            repo
+        ))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PluginRepo {
+    pub owner: String,
+    pub repo: String,
+}
+
+impl PluginRepo {
+    pub fn as_str(&self) -> String {
+        format!("{}/{}", self.owner, self.repo)
+    }
+}
+
+impl fmt::Display for PluginRepo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for PluginRepo {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let re = Regex::new(r"^[a-zA-Z0-9-]+/[a-zA-Z0-9_.-]+$").unwrap();
+        if re.is_match(s) && !s.ends_with('.') {
+            let parts: Vec<&str> = s.split('/').collect();
+            Ok(PluginRepo {
+                owner: parts[0].to_string(),
+                repo: parts[1].to_string(),
+            })
+        } else {
+            Err(format!(
+                "Invalid format: {}. Expected format: <owner>/<repo>",
+                s
+            ))
+        }
+    }
 }
