@@ -1,6 +1,8 @@
+use crate::{cli::PruneArgs, utils};
 use console::Emoji;
+use std::{fs, io, process};
 
-pub(crate) fn run(args: &crate::cli::PruneArgs) {
+pub(crate) fn run(args: &PruneArgs) {
     if args.dry_run {
         println!("{}Starting dry run prune process...", Emoji("🔍 ", ""));
         dry_run(args.force);
@@ -15,10 +17,10 @@ pub(crate) fn run(args: &crate::cli::PruneArgs) {
 }
 
 fn prune(force: bool, yes: bool) {
-    let config_dir = crate::utils::resolve_fish_config_dir();
-    let data_dir = crate::utils::resolve_pez_data_dir();
-    let (config, _) = crate::utils::ensure_config();
-    let (mut lock_file, lock_file_path) = crate::utils::ensure_lock_file();
+    let config_dir = utils::resolve_fish_config_dir();
+    let data_dir = utils::resolve_pez_data_dir();
+    let (config, _) = utils::ensure_config();
+    let (mut lock_file, lock_file_path) = utils::ensure_lock_file();
 
     println!("{}Checking for unused plugins...", Emoji("🔍 ", ""));
 
@@ -65,10 +67,10 @@ fn prune(force: bool, yes: bool) {
                 Emoji("🚧 ", "")
             );
             let mut input = String::new();
-            std::io::stdin().read_line(&mut input).unwrap();
+            io::stdin().read_line(&mut input).unwrap();
             if input.trim().to_lowercase() != "y" {
                 eprintln!("{}Aborted.", Emoji("🚧 ", ""));
-                std::process::exit(1);
+                process::exit(1);
             }
         }
     }
@@ -76,7 +78,7 @@ fn prune(force: bool, yes: bool) {
     for plugin in remove_plugins {
         let repo_path = data_dir.join(&plugin.repo);
         if repo_path.exists() {
-            std::fs::remove_dir_all(&repo_path).unwrap();
+            fs::remove_dir_all(&repo_path).unwrap();
         } else {
             println!(
                 "{}{} Repository directory at {} does not exist.",
@@ -108,7 +110,7 @@ fn prune(force: bool, yes: bool) {
             let dest_path = file.get_path(&config_dir);
             if dest_path.exists() {
                 println!("   - {}", &dest_path.display());
-                std::fs::remove_file(&dest_path).unwrap();
+                fs::remove_file(&dest_path).unwrap();
             }
         });
         lock_file.remove_plugin(&plugin.source);
@@ -121,10 +123,10 @@ fn prune(force: bool, yes: bool) {
 }
 
 fn dry_run(force: bool) {
-    let config_dir = crate::utils::resolve_fish_config_dir();
-    let data_dir = crate::utils::resolve_pez_data_dir();
-    let (config, _) = crate::utils::ensure_config();
-    let (lock_file, _) = crate::utils::ensure_lock_file();
+    let config_dir = utils::resolve_fish_config_dir();
+    let data_dir = utils::resolve_pez_data_dir();
+    let (config, _) = utils::ensure_config();
+    let (lock_file, _) = utils::ensure_lock_file();
 
     if config.plugins.is_none() {
         println!(

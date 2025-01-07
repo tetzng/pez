@@ -1,8 +1,11 @@
+use crate::{
+    cli::{PluginRepo, UninstallArgs},
+    git, utils,
+};
 use console::Emoji;
+use std::{fs, process};
 
-use crate::cli::PluginRepo;
-
-pub(crate) fn run(args: &crate::cli::UninstallArgs) {
+pub(crate) fn run(args: &UninstallArgs) {
     println!("{}Starting uninstallation process...", Emoji("🔍 ", ""));
     for plugin in &args.plugins {
         println!("\n{}Uninstalling plugin: {}", Emoji("✨ ", ""), plugin);
@@ -16,16 +19,16 @@ pub(crate) fn run(args: &crate::cli::UninstallArgs) {
 
 pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) {
     let plugin_repo = plugin_repo.as_str();
-    let source = &crate::git::format_git_url(&plugin_repo);
-    let config_dir = crate::utils::resolve_fish_config_dir();
+    let source = &git::format_git_url(&plugin_repo);
+    let config_dir = utils::resolve_fish_config_dir();
 
-    let (mut config, config_path) = crate::utils::ensure_config();
-    let repo_path = crate::utils::resolve_pez_data_dir().join(&plugin_repo);
-    let (mut lock_file, lock_file_path) = crate::utils::ensure_lock_file();
+    let (mut config, config_path) = utils::ensure_config();
+    let repo_path = utils::resolve_pez_data_dir().join(&plugin_repo);
+    let (mut lock_file, lock_file_path) = utils::ensure_lock_file();
     match lock_file.get_plugin(source) {
         Some(locked_plugin) => {
             if repo_path.exists() {
-                std::fs::remove_dir_all(&repo_path).unwrap();
+                fs::remove_dir_all(&repo_path).unwrap();
             } else {
                 println!(
                     "{}{} Repository directory at {} does not exist.",
@@ -43,7 +46,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) {
                         println!("   - {}", dest_path.display());
                     });
                     eprintln!("If you want to remove these files, use the --force flag.");
-                    std::process::exit(1);
+                    process::exit(1);
                 }
             }
 
@@ -55,7 +58,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) {
                 let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
                 if dest_path.exists() {
                     println!("   - {}", &dest_path.display());
-                    std::fs::remove_file(&dest_path).unwrap();
+                    fs::remove_file(&dest_path).unwrap();
                 }
             });
             lock_file.remove_plugin(source);
@@ -73,7 +76,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) {
                 console::style("Error:").red().bold(),
                 plugin_repo
             );
-            std::process::exit(1);
+            process::exit(1);
         }
     }
     println!(

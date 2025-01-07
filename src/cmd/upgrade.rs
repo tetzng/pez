@@ -1,6 +1,12 @@
+use crate::{
+    cli::{PluginRepo, UpgradeArgs},
+    config::PluginSpec,
+    git,
+    lock_file::Plugin,
+    utils,
+};
 use console::Emoji;
-
-use crate::cli::{PluginRepo, UpgradeArgs};
+use std::{fs, process};
 
 pub(crate) fn run(args: &UpgradeArgs) {
     println!("{}Starting upgrade process...", Emoji("🔍 ", ""));
@@ -25,12 +31,12 @@ pub(crate) fn run(args: &UpgradeArgs) {
 
 fn upgrade(plugin: &PluginRepo) {
     let plugin = plugin.as_str();
-    let (mut config, config_path) = crate::utils::ensure_config();
+    let (mut config, config_path) = utils::ensure_config();
 
     match config.plugins {
         Some(ref mut plugin_specs) => {
             if !plugin_specs.iter().any(|p| p.repo == plugin) {
-                plugin_specs.push(crate::config::PluginSpec {
+                plugin_specs.push(PluginSpec {
                     repo: plugin.to_string().clone(),
                     name: None,
                     source: None,
@@ -39,7 +45,7 @@ fn upgrade(plugin: &PluginRepo) {
             }
         }
         None => {
-            config.plugins = Some(vec![crate::config::PluginSpec {
+            config.plugins = Some(vec![PluginSpec {
                 repo: plugin.to_string(),
                 name: None,
                 source: None,
@@ -52,7 +58,7 @@ fn upgrade(plugin: &PluginRepo) {
 }
 
 fn upgrade_all() {
-    let (config, _) = crate::utils::ensure_config();
+    let (config, _) = utils::ensure_config();
     if let Some(plugins) = &config.plugins {
         for plugin in plugins {
             println!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &plugin.repo);
@@ -62,16 +68,16 @@ fn upgrade_all() {
 }
 
 fn upgrade_plugin(plugin_repo: &str) {
-    let (mut lock_file, lock_file_path) = crate::utils::ensure_lock_file();
-    let source = &crate::git::format_git_url(plugin_repo);
-    let config_dir = crate::utils::resolve_fish_config_dir();
+    let (mut lock_file, lock_file_path) = utils::ensure_lock_file();
+    let source = &git::format_git_url(plugin_repo);
+    let config_dir = utils::resolve_fish_config_dir();
 
     match lock_file.get_plugin(source) {
         Some(lock_file_plugin) => {
-            let repo_path = crate::utils::resolve_pez_data_dir().join(&lock_file_plugin.repo);
+            let repo_path = utils::resolve_pez_data_dir().join(&lock_file_plugin.repo);
             if repo_path.exists() {
                 let repo = git2::Repository::open(&repo_path).unwrap();
-                let latest_remote_commit = crate::git::get_latest_remote_commit(&repo).unwrap();
+                let latest_remote_commit = git::get_latest_remote_commit(&repo).unwrap();
                 if latest_remote_commit == lock_file_plugin.commit_sha {
                     println!(
                         "{}{} Plugin {} is already up to date.",
@@ -88,10 +94,10 @@ fn upgrade_plugin(plugin_repo: &str) {
                 lock_file_plugin.files.iter().for_each(|file| {
                     let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
                     if dest_path.exists() {
-                        std::fs::remove_file(&dest_path).unwrap();
+                        fs::remove_file(&dest_path).unwrap();
                     }
                 });
-                let mut updated_plugin = crate::lock_file::Plugin {
+                let mut updated_plugin = Plugin {
                     name: lock_file_plugin.name.to_string(),
                     repo: plugin_repo.to_string(),
                     source: source.to_string(),
@@ -100,7 +106,7 @@ fn upgrade_plugin(plugin_repo: &str) {
                 };
                 println!("{:?}", updated_plugin);
 
-                crate::utils::copy_files_to_config(&repo_path, &mut updated_plugin);
+                utils::copy_files_to_config(&repo_path, &mut updated_plugin);
 
                 lock_file.update_plugin(updated_plugin);
                 lock_file.save(&lock_file_path);
@@ -121,7 +127,7 @@ fn upgrade_plugin(plugin_repo: &str) {
                 console::style("Error:").red().bold(),
                 plugin_repo
             );
-            std::process::exit(1);
+            process::exit(1);
         }
     }
 }

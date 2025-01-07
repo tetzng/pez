@@ -1,88 +1,89 @@
-use std::{env, path::PathBuf};
-
+use crate::{
+    config,
+    lock_file::{self, LockFile, Plugin, PluginFile},
+    models::TargetDir,
+};
 use console::Emoji;
+use std::{env, fs, path};
 
-pub(crate) fn resolve_fish_config_dir() -> PathBuf {
+pub(crate) fn resolve_fish_config_dir() -> path::PathBuf {
     if let Some(dir) = env::var_os("__fish_config_dir") {
-        return PathBuf::from(dir);
+        return path::PathBuf::from(dir);
     }
 
     if let Some(dir) = env::var_os("XDG_CONFIG_HOME") {
-        return PathBuf::from(dir).join("fish");
+        return path::PathBuf::from(dir).join("fish");
     }
 
     let home = env::var("HOME").unwrap();
-    PathBuf::from(home).join(".config/fish")
+    path::PathBuf::from(home).join(".config/fish")
 }
 
-pub(crate) fn resolve_pez_config_dir() -> PathBuf {
+pub(crate) fn resolve_pez_config_dir() -> path::PathBuf {
     if let Some(dir) = env::var_os("PEZ_CONFIG_DIR") {
-        return PathBuf::from(dir);
+        return path::PathBuf::from(dir);
     }
 
     resolve_fish_config_dir()
 }
 
-pub(crate) fn resolve_lock_file_dir() -> PathBuf {
-    crate::utils::resolve_pez_config_dir()
+pub(crate) fn resolve_lock_file_dir() -> path::PathBuf {
+    resolve_pez_config_dir()
 }
 
-pub(crate) fn resolve_fish_data_dir() -> PathBuf {
+pub(crate) fn resolve_fish_data_dir() -> path::PathBuf {
     if let Some(dir) = env::var_os("__fish_user_data_dir") {
-        return PathBuf::from(dir);
+        return path::PathBuf::from(dir);
     }
 
     if let Some(dir) = env::var_os("XDG_DATA_HOME") {
-        return PathBuf::from(dir).join("fish");
+        return path::PathBuf::from(dir).join("fish");
     }
 
     let home = env::var("HOME").unwrap();
-    PathBuf::from(home).join(".local/share/fish")
+    path::PathBuf::from(home).join(".local/share/fish")
 }
 
-pub(crate) fn resolve_pez_data_dir() -> PathBuf {
+pub(crate) fn resolve_pez_data_dir() -> path::PathBuf {
     if let Some(dir) = env::var_os("PEZ_DATA_DIR") {
-        return PathBuf::from(dir);
+        return path::PathBuf::from(dir);
     }
 
     let fish_data_dir = resolve_fish_data_dir();
     fish_data_dir.join("pez")
 }
 
-pub(crate) fn ensure_config() -> (crate::config::Config, PathBuf) {
-    let config_dir = crate::utils::resolve_pez_config_dir();
+pub(crate) fn ensure_config() -> (config::Config, path::PathBuf) {
+    let config_dir = resolve_pez_config_dir();
     if !config_dir.exists() {
-        std::fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&config_dir).unwrap();
     }
     let config_path = config_dir.join("pez.toml");
     let config = if config_path.exists() {
-        crate::config::load(&config_path)
+        config::load(&config_path)
     } else {
-        crate::config::init()
+        config::init()
     };
     (config, config_path)
 }
 
-pub(crate) fn ensure_lock_file() -> (crate::lock_file::LockFile, PathBuf) {
-    let lock_file_dir = crate::utils::resolve_lock_file_dir();
+pub(crate) fn ensure_lock_file() -> (LockFile, path::PathBuf) {
+    let lock_file_dir = resolve_lock_file_dir();
     if !lock_file_dir.exists() {
-        std::fs::create_dir_all(&lock_file_dir).unwrap();
+        fs::create_dir_all(&lock_file_dir).unwrap();
     }
     let lock_file_path = lock_file_dir.join("pez-lock.toml");
     let lock_file = if lock_file_path.exists() {
-        crate::lock_file::load(&lock_file_path)
+        lock_file::load(&lock_file_path)
     } else {
-        crate::lock_file::init()
+        lock_file::init()
     };
     (lock_file, lock_file_path)
 }
 
-pub(crate) fn copy_files_to_config(
-    repo_path: &std::path::Path,
-    plugin: &mut crate::lock_file::Plugin,
-) {
+pub(crate) fn copy_files_to_config(repo_path: &path::Path, plugin: &mut Plugin) {
     let config_dir = resolve_fish_config_dir();
-    let target_dirs = crate::models::TargetDir::all();
+    let target_dirs = TargetDir::all();
     let mut has_target_file = false;
 
     println!("{}Copying files:", Emoji("📂 ", ""));
@@ -96,9 +97,9 @@ pub(crate) fn copy_files_to_config(
         }
         let dest_path = config_dir.join(target_dir.as_str());
         if !dest_path.exists() {
-            std::fs::create_dir_all(&dest_path).unwrap();
+            fs::create_dir_all(&dest_path).unwrap();
         }
-        let files = std::fs::read_dir(target_path).unwrap();
+        let files = fs::read_dir(target_path).unwrap();
         for file in files {
             let file = file.unwrap();
             if file.file_type().unwrap().is_dir() {
@@ -108,9 +109,9 @@ pub(crate) fn copy_files_to_config(
             let file_path = file.path();
             let dest_file_path = dest_path.join(&file_name);
             println!("   - {}", dest_file_path.display());
-            std::fs::copy(&file_path, &dest_file_path).unwrap();
+            fs::copy(&file_path, &dest_file_path).unwrap();
 
-            let plugin_file = crate::lock_file::PluginFile {
+            let plugin_file = PluginFile {
                 dir: target_dir.clone(),
                 name: file_name.to_string_lossy().to_string(),
             };

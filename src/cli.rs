@@ -1,7 +1,6 @@
-use std::fmt;
-
 use clap::{Args, Parser, Subcommand};
 use regex::Regex;
+use std::fmt;
 
 #[derive(Parser, Debug)]
 #[command(name = "pez", version, about, long_about = None)]

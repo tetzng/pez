@@ -1,5 +1,6 @@
+use crate::models::TargetDir;
 use serde_derive::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::{fs, path, process};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct LockFile {
@@ -14,15 +15,15 @@ pub(crate) fn init() -> LockFile {
     }
 }
 
-pub(crate) fn load(path: &PathBuf) -> LockFile {
-    let content = std::fs::read_to_string(path).unwrap();
+pub(crate) fn load(path: &path::PathBuf) -> LockFile {
+    let content = fs::read_to_string(path).unwrap();
     toml::from_str(&content).unwrap()
 }
 
 impl LockFile {
-    pub(crate) fn save(&self, path: &PathBuf) {
+    pub(crate) fn save(&self, path: &path::PathBuf) {
         let contents = toml::to_string(self).unwrap();
-        std::fs::write(path, AUTO_GENERATED_COMMENT.to_string() + &contents).unwrap();
+        fs::write(path, AUTO_GENERATED_COMMENT.to_string() + &contents).unwrap();
     }
 
     pub(crate) fn add_plugin(&mut self, plugin: Plugin) {
@@ -35,7 +36,7 @@ impl LockFile {
                 "Plugin already exists: name={}, source={}",
                 plugin.name, plugin.source
             );
-            std::process::exit(1);
+            process::exit(1);
         }
         self.plugins.push(plugin);
     }
@@ -79,7 +80,7 @@ pub(crate) struct Plugin {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct PluginFile {
-    pub(crate) dir: crate::models::TargetDir,
+    pub(crate) dir: TargetDir,
     pub(crate) name: String,
 }
 
@@ -95,7 +96,7 @@ impl Plugin {
 }
 
 impl PluginFile {
-    pub(crate) fn get_path(&self, config_dir: &Path) -> PathBuf {
+    pub(crate) fn get_path(&self, config_dir: &path::Path) -> path::PathBuf {
         config_dir.join(self.dir.as_str()).join(&self.name)
     }
 }

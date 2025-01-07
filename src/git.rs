@@ -1,5 +1,5 @@
 use git2::{Cred, Error, FetchOptions, RemoteCallbacks};
-use std::path::Path;
+use std::path;
 
 pub(crate) fn format_git_url(plugin: &str) -> String {
     format!("https://github.com/{plugin}")
@@ -7,7 +7,7 @@ pub(crate) fn format_git_url(plugin: &str) -> String {
 
 pub(crate) fn clone_repository(
     repo_url: &str,
-    target_path: &Path,
+    target_path: &path::Path,
 ) -> Result<git2::Repository, Error> {
     let callbacks = setup_remote_callbacks();
     let fetch_options = setup_fetch_options(callbacks);

@@ -1,4 +1,6 @@
+use crate::{cli, git, lock_file, utils};
 use console::Emoji;
+use std::path;
 use tabled::{Table, Tabled};
 
 #[derive(Debug, Tabled)]
@@ -18,14 +20,14 @@ struct PluginOutdatedRow {
     latest: String,
 }
 
-pub(crate) fn run(args: &crate::cli::ListArgs) {
-    let lock_file_path = crate::utils::resolve_lock_file_dir().join("pez-lock.toml");
+pub(crate) fn run(args: &cli::ListArgs) {
+    let lock_file_path = utils::resolve_lock_file_dir().join("pez-lock.toml");
     if !lock_file_path.exists() {
         println!("No plugins installed");
         return;
     }
 
-    let lock_file = crate::lock_file::load(&lock_file_path);
+    let lock_file = lock_file::load(&lock_file_path);
     if lock_file.plugins.is_empty() {
         println!("No plugins installed");
         return;
@@ -33,24 +35,24 @@ pub(crate) fn run(args: &crate::cli::ListArgs) {
 
     if args.outdated {
         match args.format {
-            Some(crate::cli::ListFormat::Table) => list_outdated_table(lock_file),
+            Some(cli::ListFormat::Table) => list_outdated_table(lock_file),
             None => list_outdated(lock_file),
         }
     } else {
         match args.format {
-            Some(crate::cli::ListFormat::Table) => list_table(lock_file),
+            Some(cli::ListFormat::Table) => list_table(lock_file),
             None => list(lock_file),
         }
     }
 }
 
-fn list(lock_file: crate::lock_file::LockFile) {
+fn list(lock_file: lock_file::LockFile) {
     for plugin in &lock_file.plugins {
         println!("{}", plugin.repo,);
     }
 }
 
-fn list_table(lock_file: crate::lock_file::LockFile) {
+fn list_table(lock_file: lock_file::LockFile) {
     let plugins = lock_file
         .plugins
         .iter()
@@ -65,11 +67,11 @@ fn list_table(lock_file: crate::lock_file::LockFile) {
     println!("{table}");
 }
 
-fn list_outdated(lock_file: crate::lock_file::LockFile) {
+fn list_outdated(lock_file: lock_file::LockFile) {
     let plugins = lock_file.plugins.iter().filter(|p| {
         let repo_path = get_repo_path(&p.repo);
         let repo = git2::Repository::open(&repo_path).unwrap();
-        let latest_remote_commit = crate::git::get_latest_remote_commit(&repo).unwrap();
+        let latest_remote_commit = git::get_latest_remote_commit(&repo).unwrap();
         p.commit_sha != latest_remote_commit
     });
     if plugins.clone().count() == 0 {
@@ -81,14 +83,14 @@ fn list_outdated(lock_file: crate::lock_file::LockFile) {
     });
 }
 
-fn list_outdated_table(lock_file: crate::lock_file::LockFile) {
+fn list_outdated_table(lock_file: lock_file::LockFile) {
     let plugins = lock_file
         .plugins
         .iter()
         .filter(|p| {
             let repo_path = get_repo_path(&p.repo);
             let repo = git2::Repository::open(&repo_path).unwrap();
-            let latest_remote_commit = crate::git::get_latest_remote_commit(&repo).unwrap();
+            let latest_remote_commit = git::get_latest_remote_commit(&repo).unwrap();
             p.commit_sha != latest_remote_commit
         })
         .map(|p| PluginOutdatedRow {
@@ -99,7 +101,7 @@ fn list_outdated_table(lock_file: crate::lock_file::LockFile) {
             latest: {
                 let repo_path = get_repo_path(&p.repo);
                 let repo = git2::Repository::open(&repo_path).unwrap();
-                crate::git::get_latest_remote_commit(&repo).unwrap()[..7].to_string()
+                git::get_latest_remote_commit(&repo).unwrap()[..7].to_string()
             },
         })
         .collect::<Vec<PluginOutdatedRow>>();
@@ -107,6 +109,6 @@ fn list_outdated_table(lock_file: crate::lock_file::LockFile) {
     println!("{table}");
 }
 
-fn get_repo_path(plugin_repo: &str) -> std::path::PathBuf {
-    crate::utils::resolve_pez_data_dir().join(plugin_repo)
+fn get_repo_path(plugin_repo: &str) -> path::PathBuf {
+    utils::resolve_pez_data_dir().join(plugin_repo)
 }

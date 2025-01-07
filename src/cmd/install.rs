@@ -12,15 +12,21 @@ use tokio::sync::Mutex;
 
 pub(crate) async fn run(args: &InstallArgs) {
     println!("{}Starting installation process...", Emoji("🔍 ", ""));
-    if let Some(plugins) = &args.plugins {
-        install(plugins, &args.force).await;
-    } else {
-        install_from_lock_file(&args.force, &args.prune);
-    }
+
+    handle_installation(args).await;
+
     println!(
         "\n{}All specified plugins have been installed successfully!",
         Emoji("🎉 ", "")
     );
+}
+
+async fn handle_installation(args: &InstallArgs) {
+    if let Some(plugins) = &args.plugins {
+        install(plugins, &args.force).await;
+    } else {
+        install_all(&args.force, &args.prune);
+    }
 }
 
 async fn install(plugin_repo_list: &Vec<PluginRepo>, force: &bool) {
@@ -43,7 +49,7 @@ async fn install(plugin_repo_list: &Vec<PluginRepo>, force: &bool) {
     lock_file.save(&lock_file_path);
     println!(
         "{}All plugins have been installed successfully!",
-        Emoji("🎉 ", "")
+        Emoji("✅ ", "")
     );
 }
 
@@ -173,8 +179,8 @@ fn handle_existing_repository(force: &bool, repo: &str, repo_path: &path::Path) 
 
 async fn sync_plugin_files(new_plugins: &mut [Plugin], pez_data_dir: &path::Path) -> Vec<Plugin> {
     println!(
-        "{}Copying plugin files to fish config directory...",
-        Emoji("📂 ", "")
+        "\n{}Copying plugin files to fish config directory...",
+        Emoji("🐟 ", "")
     );
     let config_dir = utils::resolve_fish_config_dir();
     let target_dirs = TargetDir::all();
@@ -260,7 +266,7 @@ async fn sync_plugin_files(new_plugins: &mut [Plugin], pez_data_dir: &path::Path
     new_plugins.to_vec()
 }
 
-fn install_from_lock_file(force: &bool, prune: &bool) {
+fn install_all(force: &bool, prune: &bool) {
     let (mut lock_file, lock_file_path) = utils::ensure_lock_file();
     let (config, _) = utils::ensure_config();
 
@@ -278,7 +284,7 @@ fn install_from_lock_file(force: &bool, prune: &bool) {
 
         println!(
             "\n{}Installing plugin: {}",
-            Emoji("✨ ", ""),
+            Emoji("🐟 ", ""),
             &plugin_spec.repo
         );
         match lock_file.get_plugin(&source) {
@@ -332,8 +338,6 @@ fn install_from_lock_file(force: &bool, prune: &bool) {
                         process::exit(1);
                     }
                 }
-
-                println!("Installing {}", plugin_spec.repo);
 
                 let repo = git2::Repository::clone(&source, &repo_path).unwrap();
                 let commit_sha = git::get_latest_commit_sha(repo).unwrap();
