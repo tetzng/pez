@@ -54,9 +54,8 @@ pub(crate) struct InstallArgs {
 #[derive(Args, Debug)]
 pub(crate) struct UninstallArgs {
     /// GitHub repo in the format <owner>/<repo>
-    #[arg(required = true, value_parser = validate_plugin_format
-    )]
-    pub(crate) plugins: Vec<String>,
+    #[arg(required = true)]
+    pub(crate) plugins: Vec<PluginRepo>,
 
     /// Force uninstall even if the plugin data directory does not exist
     #[arg(short, long)]
@@ -66,8 +65,7 @@ pub(crate) struct UninstallArgs {
 #[derive(Args, Debug)]
 pub(crate) struct UpgradeArgs {
     /// GitHub repo in the format <owner>/<repo>
-    #[arg(value_parser = validate_plugin_format)]
-    pub(crate) plugins: Option<Vec<String>>,
+    pub(crate) plugins: Option<Vec<PluginRepo>>,
 }
 
 #[derive(Args, Debug)]
@@ -104,18 +102,6 @@ pub(crate) enum ListFormat {
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub(crate) enum ShellType {
     Fish,
-}
-
-fn validate_plugin_format(repo: &str) -> Result<String, String> {
-    let re = Regex::new(r"^[a-zA-Z0-9-]+/[a-zA-Z0-9_.-]+$").unwrap();
-    if re.is_match(repo) && !repo.ends_with('.') {
-        Ok(repo.to_string())
-    } else {
-        Err(format!(
-            "Invalid format: {}. Expected format: <owner>/<repo>",
-            repo
-        ))
-    }
 }
 
 #[derive(Debug, Clone)]

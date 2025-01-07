@@ -1,6 +1,6 @@
 use console::Emoji;
 
-use crate::cli::UpgradeArgs;
+use crate::cli::{PluginRepo, UpgradeArgs};
 
 pub(crate) fn run(args: &UpgradeArgs) {
     println!("{}Starting upgrade process...", Emoji("🔍 ", ""));
@@ -23,17 +23,8 @@ pub(crate) fn run(args: &UpgradeArgs) {
     );
 }
 
-fn upgrade(plugin: &str) {
-    let parts = plugin.split("/").collect::<Vec<&str>>();
-    if parts.len() != 2 {
-        eprintln!(
-            "{}{} Invalid plugin format: {}",
-            Emoji("❌ ", ""),
-            console::style("Error:").red().bold(),
-            plugin
-        );
-        std::process::exit(1);
-    }
+fn upgrade(plugin: &PluginRepo) {
+    let plugin = plugin.as_str();
     let (mut config, config_path) = crate::utils::ensure_config();
 
     match config.plugins {
@@ -57,7 +48,7 @@ fn upgrade(plugin: &str) {
         }
     }
 
-    upgrade_plugin(plugin);
+    upgrade_plugin(&plugin);
 }
 
 fn upgrade_all() {

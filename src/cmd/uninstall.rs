@@ -1,5 +1,7 @@
 use console::Emoji;
 
+use crate::cli::PluginRepo;
+
 pub(crate) fn run(args: &crate::cli::UninstallArgs) {
     println!("{}Starting uninstallation process...", Emoji("🔍 ", ""));
     for plugin in &args.plugins {
@@ -12,22 +14,13 @@ pub(crate) fn run(args: &crate::cli::UninstallArgs) {
     );
 }
 
-pub(crate) fn uninstall(plugin_repo: &str, force: bool) {
-    let parts = plugin_repo.split("/").collect::<Vec<&str>>();
-    if parts.len() != 2 {
-        eprintln!(
-            "{}{} Invalid plugin format: {}",
-            Emoji("❌ ", ""),
-            console::style("Error:").red().bold(),
-            plugin_repo
-        );
-        std::process::exit(1);
-    }
-    let source = &crate::git::format_git_url(plugin_repo);
+pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) {
+    let plugin_repo = plugin_repo.as_str();
+    let source = &crate::git::format_git_url(&plugin_repo);
     let config_dir = crate::utils::resolve_fish_config_dir();
 
     let (mut config, config_path) = crate::utils::ensure_config();
-    let repo_path = crate::utils::resolve_pez_data_dir().join(plugin_repo);
+    let repo_path = crate::utils::resolve_pez_data_dir().join(&plugin_repo);
     let (mut lock_file, lock_file_path) = crate::utils::ensure_lock_file();
     match lock_file.get_plugin(source) {
         Some(locked_plugin) => {
