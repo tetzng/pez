@@ -21,4 +21,4 @@ toml = "0.8.19"
 clap_complete = "4.5.41"
 regex = "1.11.1"
 futures = "0.3.31"
-tokio = {version = "1.42.0", features = ["macros", "rt", "rt-multi-thread", "sync"]}
+tokio = {version = "1.43.0", features = ["macros", "rt", "rt-multi-thread", "sync"]}
