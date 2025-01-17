@@ -1,10 +1,10 @@
 use crate::utils;
 use std::{fs, process};
 
-pub(crate) fn run() {
-    let config_dir = utils::resolve_pez_config_dir();
+pub(crate) fn run() -> anyhow::Result<()> {
+    let config_dir = utils::load_pez_config_dir()?;
     if !config_dir.exists() {
-        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&config_dir)?;
     }
 
     let config_path = config_dir.join("pez.toml");
@@ -21,6 +21,7 @@ pub(crate) fn run() {
 
 # Add more plugins below by copying the [[plugins]] block.
 "#;
-    fs::write(&config_path, contents).unwrap();
+    fs::write(&config_path, contents)?;
     println!("Created {}", config_path.display());
+    Ok(())
 }

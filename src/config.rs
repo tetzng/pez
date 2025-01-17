@@ -17,25 +17,34 @@ pub(crate) fn init() -> Config {
     Config { plugins: None }
 }
 
-pub(crate) fn load(path: &path::PathBuf) -> Config {
-    let content = fs::read_to_string(path).unwrap();
-    toml::from_str(&content).unwrap()
+pub(crate) fn load(path: &path::PathBuf) -> anyhow::Result<Config> {
+    let content = fs::read_to_string(path)?;
+    let config = toml::from_str(&content)?;
+
+    Ok(config)
 }
 
 impl Config {
-    pub(crate) fn save(&self, path: &path::PathBuf) {
-        let contents = toml::to_string(self).unwrap();
-        fs::write(path, contents).unwrap();
+    pub(crate) fn save(&self, path: &path::PathBuf) -> anyhow::Result<()> {
+        let contents = toml::to_string(self)?;
+        fs::write(path, contents)?;
+
+        Ok(())
     }
 }
 
 impl PluginSpec {
-    pub(crate) fn get_name(&self) -> String {
+    pub(crate) fn get_name(&self) -> anyhow::Result<String> {
         if self.name.is_none() {
             let parts: Vec<&str> = self.repo.split("/").collect();
-            parts[parts.len() - 1].to_owned()
+            Ok(parts[parts.len() - 1].to_owned())
         } else {
-            self.name.clone().unwrap()
+            let name = self
+                .name
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("Name not found"))?;
+
+            Ok(name)
         }
     }
 }

@@ -5,59 +5,64 @@ use crate::{
     models::TargetDir,
     utils,
 };
+use anyhow::Ok;
 use console::Emoji;
 use futures::future;
-use std::{collections::HashSet, fs, path, process, sync::Arc};
+use std::{collections::HashSet, fs, path, process, result, sync::Arc};
 use tokio::sync::Mutex;
 
-pub(crate) async fn run(args: &InstallArgs) {
+pub(crate) async fn run(args: &InstallArgs) -> anyhow::Result<()> {
     println!("{}Starting installation process...", Emoji("🔍 ", ""));
 
-    handle_installation(args).await;
+    handle_installation(args).await?;
 
-    println!(
-        "\n{}All specified plugins have been installed successfully!",
-        Emoji("🎉 ", "")
-    );
+    Ok(())
 }
 
-async fn handle_installation(args: &InstallArgs) {
+async fn handle_installation(args: &InstallArgs) -> anyhow::Result<()> {
     if let Some(plugins) = &args.plugins {
-        install(plugins, &args.force).await;
+        install(plugins, &args.force).await?;
+        println!(
+            "\n{}All specified plugins have been installed successfully!",
+            Emoji("🎉 ", "")
+        );
     } else {
-        install_all(&args.force, &args.prune);
+        install_all(&args.force, &args.prune)?;
     }
+
+    Ok(())
 }
 
-async fn install(plugin_repo_list: &Vec<PluginRepo>, force: &bool) {
-    let (mut config, config_path) = utils::ensure_config();
-    update_config_file(&mut config, &config_path, plugin_repo_list);
+async fn install(plugin_repo_list: &Vec<PluginRepo>, force: &bool) -> anyhow::Result<()> {
+    let (mut config, config_path) = utils::load_or_create_config()?;
+    update_config_file(&mut config, &config_path, plugin_repo_list)?;
 
-    let (mut lock_file, lock_file_path) = utils::ensure_lock_file();
+    let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
 
-    let pez_data_dir = utils::resolve_pez_data_dir();
+    let pez_data_dir = utils::load_pez_data_dir()?;
     let mut new_plugins = clone_plugins(
         plugin_repo_list.iter().collect(),
         *force,
         lock_file.clone(),
         &pez_data_dir,
     )
-    .await;
+    .await?;
 
-    let new_plugins = sync_plugin_files(&mut new_plugins, &pez_data_dir).await;
+    let new_plugins = sync_plugin_files(&mut new_plugins, &pez_data_dir).await?;
     lock_file.merge_plugins(new_plugins);
-    lock_file.save(&lock_file_path);
+    lock_file.save(&lock_file_path)?;
     println!(
         "{}All plugins have been installed successfully!",
         Emoji("✅ ", "")
     );
+    Ok(())
 }
 
 fn update_config_file(
     config: &mut config::Config,
     config_path: &path::Path,
     plugin_repo_list: &Vec<PluginRepo>,
-) {
+) -> anyhow::Result<()> {
     match config.plugins {
         Some(ref mut plugin_specs) => {
             for plugin_repo in plugin_repo_list {
@@ -83,7 +88,9 @@ fn update_config_file(
             config.plugins = Some(plugin_specs);
         }
     }
-    config.save(&config_path.to_path_buf());
+    config.save(&config_path.to_path_buf())?;
+
+    Ok(())
 }
 
 async fn clone_plugins(
@@ -91,7 +98,7 @@ async fn clone_plugins(
     force: bool,
     lock_file: LockFile,
     pez_data_dir: &path::Path,
-) -> Vec<Plugin> {
+) -> anyhow::Result<Vec<Plugin>> {
     let lock_file = Arc::new(Mutex::new(lock_file));
     let new_lock_plugins: Arc<Mutex<Vec<Plugin>>> = Arc::new(Mutex::new(vec![]));
 
@@ -108,7 +115,7 @@ async fn clone_plugins(
                 let repo_path = pez_data_dir.join(&plugin_repo_str);
 
                 if repo_path.exists() {
-                    handle_existing_repository(&force, &plugin_repo_str, &repo_path);
+                    handle_existing_repository(&force, &plugin_repo_str, &repo_path).unwrap();
                 }
 
                 let source = &git::format_git_url(&plugin_repo_str);
@@ -160,12 +167,19 @@ async fn clone_plugins(
 
     future::join_all(clone_tasks).await;
 
-    Arc::try_unwrap(new_lock_plugins).unwrap().into_inner()
+    match Arc::try_unwrap(new_lock_plugins) {
+        result::Result::Ok(new_lock_plugins) => Ok(new_lock_plugins.into_inner()),
+        Err(_) => panic!("Failed to unwrap new_lock_plugins"),
+    }
 }
 
-fn handle_existing_repository(force: &bool, repo: &str, repo_path: &path::Path) {
+fn handle_existing_repository(
+    force: &bool,
+    repo: &str,
+    repo_path: &path::Path,
+) -> anyhow::Result<()> {
     if *force {
-        fs::remove_dir_all(repo_path).unwrap();
+        fs::remove_dir_all(repo_path)?;
     } else {
         eprintln!(
             "{}{} Plugin already exists: {}, Use --force to reinstall",
@@ -175,14 +189,18 @@ fn handle_existing_repository(force: &bool, repo: &str, repo_path: &path::Path) 
         );
         process::exit(1);
     }
+    Ok(())
 }
 
-async fn sync_plugin_files(new_plugins: &mut [Plugin], pez_data_dir: &path::Path) -> Vec<Plugin> {
+async fn sync_plugin_files(
+    new_plugins: &mut [Plugin],
+    pez_data_dir: &path::Path,
+) -> anyhow::Result<Vec<Plugin>> {
     println!(
         "\n{}Copying plugin files to fish config directory...",
         Emoji("🐟 ", "")
     );
-    let config_dir = utils::resolve_fish_config_dir();
+    let config_dir = utils::load_fish_config_dir()?;
     let target_dirs = TargetDir::all();
 
     let mut copy_tasks = Vec::new();
@@ -206,7 +224,7 @@ async fn sync_plugin_files(new_plugins: &mut [Plugin], pez_data_dir: &path::Path
                 TargetDir::Themes => ".theme",
                 _ => ".fish",
             };
-            let files = fs::read_dir(target_path).unwrap().filter(|f| {
+            let files = fs::read_dir(target_path)?.filter(|f| {
                 f.as_ref().unwrap().file_type().unwrap().is_file()
                     && f.as_ref()
                         .unwrap()
@@ -216,8 +234,7 @@ async fn sync_plugin_files(new_plugins: &mut [Plugin], pez_data_dir: &path::Path
             });
 
             for file in files {
-                let file = file.unwrap();
-                let file_name = file.file_name();
+                let file_name = file?.file_name();
                 let dest_path = config_dir.join(target_dir_str).join(&file_name);
 
                 if dest_paths.contains(&dest_path) {
@@ -263,12 +280,12 @@ async fn sync_plugin_files(new_plugins: &mut [Plugin], pez_data_dir: &path::Path
     }
 
     futures::future::join_all(copy_tasks).await;
-    new_plugins.to_vec()
+    Ok(new_plugins.to_vec())
 }
 
-fn install_all(force: &bool, prune: &bool) {
-    let (mut lock_file, lock_file_path) = utils::ensure_lock_file();
-    let (config, _) = utils::ensure_config();
+fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
+    let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
+    let (config, _) = utils::load_config()?;
 
     let plugin_specs = match config.plugins {
         Some(plugins) => plugins,
@@ -280,7 +297,7 @@ fn install_all(force: &bool, prune: &bool) {
 
     for plugin_spec in plugin_specs.iter() {
         let source = git::format_git_url(&plugin_spec.repo);
-        let repo_path = utils::resolve_pez_data_dir().join(&plugin_spec.repo);
+        let repo_path = utils::load_pez_data_dir()?.join(&plugin_spec.repo);
 
         println!(
             "\n{}Installing plugin: {}",
@@ -305,29 +322,28 @@ fn install_all(force: &bool, prune: &bool) {
                     &source,
                     &repo_path.display()
                 );
-                let repo = git::clone_repository(&source, &repo_path).unwrap();
+                let repo = git::clone_repository(&source, &repo_path)?;
                 println!(
                     "{}Checking out commit sha: {}",
                     Emoji("🔄 ", ""),
                     &locked_plugin.commit_sha
                 );
-                repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha).unwrap())
-                    .unwrap();
+                repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha)?)?;
                 let mut plugin = Plugin {
-                    name: plugin_spec.get_name(),
+                    name: plugin_spec.get_name()?,
                     repo: plugin_spec.repo.clone(),
                     source: source.to_string(),
                     commit_sha: locked_plugin.commit_sha.clone(),
                     files: vec![],
                 };
-                utils::copy_files_to_config(&repo_path, &mut plugin);
+                utils::copy_plugin_files_from_repo(&repo_path, &mut plugin)?;
                 lock_file.update_plugin(plugin);
-                lock_file.save(&lock_file_path);
+                lock_file.save(&lock_file_path)?;
             }
             None => {
                 if repo_path.exists() {
                     if *force {
-                        fs::remove_dir_all(&repo_path).unwrap();
+                        fs::remove_dir_all(&repo_path)?;
                     } else {
                         eprintln!(
                             "{}{} Plugin already exists: {}, Use --force to reinstall",
@@ -339,19 +355,19 @@ fn install_all(force: &bool, prune: &bool) {
                     }
                 }
 
-                let repo = git2::Repository::clone(&source, &repo_path).unwrap();
-                let commit_sha = git::get_latest_commit_sha(repo).unwrap();
+                let repo = git2::Repository::clone(&source, &repo_path)?;
+                let commit_sha = git::get_latest_commit_sha(repo)?;
                 let mut plugin = Plugin {
-                    name: plugin_spec.get_name(),
+                    name: plugin_spec.get_name()?,
                     repo: plugin_spec.repo.clone(),
                     source: source.to_string(),
                     commit_sha,
                     files: vec![],
                 };
-                utils::copy_files_to_config(&repo_path, &mut plugin);
+                utils::copy_plugin_files_from_repo(&repo_path, &mut plugin)?;
 
                 lock_file.add_plugin(plugin);
-                lock_file.save(&lock_file_path);
+                lock_file.save(&lock_file_path)?;
             }
         }
     }
@@ -371,9 +387,9 @@ fn install_all(force: &bool, prune: &bool) {
         if *prune {
             for plugin in ignored_lock_file_plugins {
                 println!("\n{}Removing plugin: {}", Emoji("🐟 ", ""), &plugin.name);
-                let repo_path = utils::resolve_pez_data_dir().join(&plugin.repo);
+                let repo_path = utils::load_pez_data_dir()?.join(&plugin.repo);
                 if repo_path.exists() {
-                    fs::remove_dir_all(&repo_path).unwrap();
+                    fs::remove_dir_all(&repo_path)?;
                 } else {
                     println!(
                         "{}Repository directory at {} does not exist.",
@@ -386,10 +402,11 @@ fn install_all(force: &bool, prune: &bool) {
                             "{}Detected plugin files based on pez-lock.toml:",
                             Emoji("📄 ", ""),
                         );
+                        let fish_config_dir = utils::load_fish_config_dir()?;
+
                         plugin.files.iter().for_each(|file| {
-                            let dest_path = utils::resolve_fish_config_dir()
-                                .join(file.dir.as_str())
-                                .join(&file.name);
+                            let dest_path =
+                                fish_config_dir.join(file.dir.as_str()).join(&file.name);
                             println!("   - {}", dest_path.display());
                         });
                         println!("If you want to remove these files, use the --force flag.");
@@ -401,16 +418,15 @@ fn install_all(force: &bool, prune: &bool) {
                     "{}Removing plugin files based on pez-lock.toml:",
                     Emoji("🗑️  ", ""),
                 );
+                let fish_config_dir = utils::load_fish_config_dir()?;
                 plugin.files.iter().for_each(|file| {
-                    let dest_path = utils::resolve_fish_config_dir()
-                        .join(file.dir.as_str())
-                        .join(&file.name);
+                    let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
                     if dest_path.exists() {
                         println!("   - {}", &dest_path.display());
                         fs::remove_file(&dest_path).unwrap();
                     }
                     lock_file.remove_plugin(&plugin.source);
-                    lock_file.save(&lock_file_path);
+                    lock_file.save(&lock_file_path).unwrap();
                 });
             }
         } else {
@@ -424,4 +440,5 @@ fn install_all(force: &bool, prune: &bool) {
             println!("  pez prune");
         }
     }
+    Ok(())
 }

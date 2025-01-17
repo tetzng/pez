@@ -5,15 +5,16 @@ use crate::{
     lock_file::Plugin,
     utils,
 };
+use anyhow::Ok;
 use console::Emoji;
 use std::{fs, process};
 
-pub(crate) fn run(args: &UpgradeArgs) {
+pub(crate) fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
     println!("{}Starting upgrade process...", Emoji("🔍 ", ""));
     if let Some(plugins) = &args.plugins {
         for plugin in plugins {
             println!("\n{}Upgrading plugin: {plugin}", Emoji("✨ ", ""));
-            upgrade(plugin);
+            upgrade(plugin)?;
             println!(
                 "{}Successfully upgraded plugin: {}",
                 Emoji("✅ ", ""),
@@ -21,17 +22,19 @@ pub(crate) fn run(args: &UpgradeArgs) {
             );
         }
     } else {
-        upgrade_all();
+        upgrade_all()?;
     }
     println!(
         "\n{}All specified plugins have been upgraded successfully!",
         Emoji("🎉 ", "")
     );
+
+    Ok(())
 }
 
-fn upgrade(plugin: &PluginRepo) {
+fn upgrade(plugin: &PluginRepo) -> anyhow::Result<()> {
     let plugin = plugin.as_str();
-    let (mut config, config_path) = utils::ensure_config();
+    let (mut config, config_path) = utils::load_or_create_config()?;
 
     match config.plugins {
         Some(ref mut plugin_specs) => {
@@ -41,7 +44,7 @@ fn upgrade(plugin: &PluginRepo) {
                     name: None,
                     source: None,
                 });
-                config.save(&config_path);
+                config.save(&config_path)?;
             }
         }
         None => {
@@ -50,34 +53,38 @@ fn upgrade(plugin: &PluginRepo) {
                 name: None,
                 source: None,
             }]);
-            config.save(&config_path);
+            config.save(&config_path)?;
         }
     }
 
-    upgrade_plugin(&plugin);
+    upgrade_plugin(&plugin)?;
+
+    Ok(())
 }
 
-fn upgrade_all() {
-    let (config, _) = utils::ensure_config();
+fn upgrade_all() -> anyhow::Result<()> {
+    let (config, _) = utils::load_or_create_config()?;
     if let Some(plugins) = &config.plugins {
         for plugin in plugins {
             println!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &plugin.repo);
-            upgrade_plugin(&plugin.repo);
+            upgrade_plugin(&plugin.repo)?;
         }
     }
+
+    Ok(())
 }
 
-fn upgrade_plugin(plugin_repo: &str) {
-    let (mut lock_file, lock_file_path) = utils::ensure_lock_file();
+fn upgrade_plugin(plugin_repo: &str) -> anyhow::Result<()> {
+    let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
     let source = &git::format_git_url(plugin_repo);
-    let config_dir = utils::resolve_fish_config_dir();
+    let config_dir = utils::load_fish_config_dir()?;
 
     match lock_file.get_plugin(source) {
         Some(lock_file_plugin) => {
-            let repo_path = utils::resolve_pez_data_dir().join(&lock_file_plugin.repo);
+            let repo_path = utils::load_pez_data_dir()?.join(&lock_file_plugin.repo);
             if repo_path.exists() {
-                let repo = git2::Repository::open(&repo_path).unwrap();
-                let latest_remote_commit = git::get_latest_remote_commit(&repo).unwrap();
+                let repo = git2::Repository::open(&repo_path)?;
+                let latest_remote_commit = git::get_latest_remote_commit(&repo)?;
                 if latest_remote_commit == lock_file_plugin.commit_sha {
                     println!(
                         "{}{} Plugin {} is already up to date.",
@@ -85,11 +92,10 @@ fn upgrade_plugin(plugin_repo: &str) {
                         console::style("Info:").cyan(),
                         plugin_repo
                     );
-                    return;
+                    return Ok(());
                 }
 
-                repo.set_head_detached(git2::Oid::from_str(&latest_remote_commit).unwrap())
-                    .unwrap();
+                repo.set_head_detached(git2::Oid::from_str(&latest_remote_commit)?)?;
 
                 lock_file_plugin.files.iter().for_each(|file| {
                     let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
@@ -106,10 +112,10 @@ fn upgrade_plugin(plugin_repo: &str) {
                 };
                 println!("{:?}", updated_plugin);
 
-                utils::copy_files_to_config(&repo_path, &mut updated_plugin);
+                utils::copy_plugin_files_from_repo(&repo_path, &mut updated_plugin)?;
 
                 lock_file.update_plugin(updated_plugin);
-                lock_file.save(&lock_file_path);
+                lock_file.save(&lock_file_path)?;
             } else {
                 println!(
                     "{}{} Repository directory at {} does not exist.",
@@ -130,4 +136,6 @@ fn upgrade_plugin(plugin_repo: &str) {
             process::exit(1);
         }
     }
+
+    Ok(())
 }

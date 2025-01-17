@@ -1,4 +1,5 @@
 use crate::models::TargetDir;
+use anyhow::Ok;
 use serde_derive::{Deserialize, Serialize};
 use std::{fs, path, process};
 
@@ -15,15 +16,19 @@ pub(crate) fn init() -> LockFile {
     }
 }
 
-pub(crate) fn load(path: &path::PathBuf) -> LockFile {
-    let content = fs::read_to_string(path).unwrap();
-    toml::from_str(&content).unwrap()
+pub(crate) fn load(path: &path::PathBuf) -> anyhow::Result<LockFile> {
+    let content = fs::read_to_string(path)?;
+    let lock_file = toml::from_str(&content)?;
+
+    Ok(lock_file)
 }
 
 impl LockFile {
-    pub(crate) fn save(&self, path: &path::PathBuf) {
-        let contents = toml::to_string(self).unwrap();
-        fs::write(path, AUTO_GENERATED_COMMENT.to_string() + &contents).unwrap();
+    pub(crate) fn save(&self, path: &path::PathBuf) -> anyhow::Result<()> {
+        let contents = toml::to_string(self)?;
+        fs::write(path, AUTO_GENERATED_COMMENT.to_string() + &contents)?;
+
+        Ok(())
     }
 
     pub(crate) fn add_plugin(&mut self, plugin: Plugin) {

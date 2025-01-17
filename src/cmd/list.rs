@@ -1,6 +1,6 @@
-use crate::{cli, git, lock_file, utils};
+use crate::{cli, git, lock_file::Plugin, utils};
+use anyhow::Ok;
 use console::Emoji;
-use std::path;
 use tabled::{Table, Tabled};
 
 #[derive(Debug, Tabled)]
@@ -20,41 +20,47 @@ struct PluginOutdatedRow {
     latest: String,
 }
 
-pub(crate) fn run(args: &cli::ListArgs) {
-    let lock_file_path = utils::resolve_lock_file_dir().join("pez-lock.toml");
-    if !lock_file_path.exists() {
-        println!("No plugins installed");
-        return;
+pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
+    let result = utils::load_lock_file();
+    if result.is_err() {
+        println!("No plugins installed!");
+        return Ok(());
     }
 
-    let lock_file = lock_file::load(&lock_file_path);
-    if lock_file.plugins.is_empty() {
-        println!("No plugins installed");
-        return;
+    let (lock_file, _) = result.unwrap();
+    let plugins = &lock_file.plugins;
+    if plugins.is_empty() {
+        println!("No plugins installed!");
+        return Ok(());
     }
 
     if args.outdated {
         match args.format {
-            Some(cli::ListFormat::Table) => list_outdated_table(lock_file),
-            None => list_outdated(lock_file),
+            Some(cli::ListFormat::Table) => list_outdated_table(plugins)?,
+            None => list_outdated(plugins)?,
         }
     } else {
         match args.format {
-            Some(cli::ListFormat::Table) => list_table(lock_file),
-            None => list(lock_file),
+            Some(cli::ListFormat::Table) => display_plugins_in_table(plugins),
+            None => list(plugins),
         }
     }
+
+    Ok(())
 }
 
-fn list(lock_file: lock_file::LockFile) {
-    for plugin in &lock_file.plugins {
-        println!("{}", plugin.repo,);
-    }
+fn list(plugins: &[Plugin]) {
+    display_plugins(plugins);
 }
 
-fn list_table(lock_file: lock_file::LockFile) {
-    let plugins = lock_file
-        .plugins
+fn display_plugins(plugins: &[Plugin]) {
+    plugins.iter().for_each(|p| {
+        println!("{}", p.repo);
+    });
+}
+
+fn display_plugins_in_table(plugins: &[Plugin]) {
+    let plugin_rows = plugins
         .iter()
         .map(|p| PluginRow {
             name: p.get_name(),
@@ -63,52 +69,61 @@ fn list_table(lock_file: lock_file::LockFile) {
             commit: p.commit_sha[..7].to_string(),
         })
         .collect::<Vec<PluginRow>>();
-    let table = Table::new(&plugins);
+    let table = Table::new(&plugin_rows);
     println!("{table}");
 }
 
-fn list_outdated(lock_file: lock_file::LockFile) {
-    let plugins = lock_file.plugins.iter().filter(|p| {
-        let repo_path = get_repo_path(&p.repo);
-        let repo = git2::Repository::open(&repo_path).unwrap();
-        let latest_remote_commit = git::get_latest_remote_commit(&repo).unwrap();
-        p.commit_sha != latest_remote_commit
-    });
-    if plugins.clone().count() == 0 {
+fn list_outdated(plugins: &[Plugin]) -> anyhow::Result<()> {
+    let outdated_plugins = get_outdated_plugins(plugins)?;
+    if outdated_plugins.is_empty() {
         println!("{}All plugins are up to date!", Emoji("🎉 ", ""));
-        return;
+        return Ok(());
     }
-    plugins.for_each(|p| {
-        println!("{}", p.repo);
-    });
+    display_plugins(&outdated_plugins);
+
+    Ok(())
 }
 
-fn list_outdated_table(lock_file: lock_file::LockFile) {
-    let plugins = lock_file
-        .plugins
+fn get_outdated_plugins(plugins: &[Plugin]) -> anyhow::Result<Vec<Plugin>> {
+    let data_dir = utils::load_pez_data_dir()?;
+    let outdated_plugins: Vec<Plugin> = plugins
         .iter()
         .filter(|p| {
-            let repo_path = get_repo_path(&p.repo);
+            let repo_path = data_dir.join(&p.repo);
             let repo = git2::Repository::open(&repo_path).unwrap();
             let latest_remote_commit = git::get_latest_remote_commit(&repo).unwrap();
             p.commit_sha != latest_remote_commit
         })
+        .cloned()
+        .collect();
+
+    Ok(outdated_plugins)
+}
+
+fn list_outdated_table(plugins: &[Plugin]) -> anyhow::Result<()> {
+    let data_dir = utils::load_pez_data_dir()?;
+    let outdated_plugins = get_outdated_plugins(plugins)?;
+    if outdated_plugins.is_empty() {
+        println!("{}All plugins are up to date!", Emoji("🎉 ", ""));
+        return Ok(());
+    }
+
+    let plugin_rows = outdated_plugins
+        .iter()
         .map(|p| PluginOutdatedRow {
             name: p.get_name(),
             repo: p.repo.clone(),
             source: p.source.clone(),
             current: p.commit_sha[..7].to_string(),
             latest: {
-                let repo_path = get_repo_path(&p.repo);
+                let repo_path = data_dir.join(&p.repo);
                 let repo = git2::Repository::open(&repo_path).unwrap();
                 git::get_latest_remote_commit(&repo).unwrap()[..7].to_string()
             },
         })
         .collect::<Vec<PluginOutdatedRow>>();
-    let table = Table::new(&plugins);
+    let table = Table::new(&plugin_rows);
     println!("{table}");
-}
 
-fn get_repo_path(plugin_repo: &str) -> path::PathBuf {
-    utils::resolve_pez_data_dir().join(plugin_repo)
+    Ok(())
 }

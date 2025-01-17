@@ -8,7 +8,7 @@ pub(crate) fn format_git_url(plugin: &str) -> String {
 pub(crate) fn clone_repository(
     repo_url: &str,
     target_path: &path::Path,
-) -> Result<git2::Repository, Error> {
+) -> anyhow::Result<git2::Repository> {
     let callbacks = setup_remote_callbacks();
     let fetch_options = setup_fetch_options(callbacks);
 
@@ -53,7 +53,7 @@ fn get_remote_name(upstream: &git2::Branch) -> Result<String, Error> {
     Ok(parts[2].to_string())
 }
 
-pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> Result<String, Error> {
+pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> anyhow::Result<String> {
     let head = repo.head()?;
 
     if head.is_branch() {
@@ -65,7 +65,7 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> Result<String
 
         let upstream = match local_branch.upstream() {
             Ok(u) => u,
-            Err(_) => return Err(Error::from_str("No upstream branch set")),
+            Err(_) => return Err(anyhow::anyhow!("No upstream branch set")),
         };
 
         let remote_name = get_remote_name(&upstream)?;
@@ -73,7 +73,13 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> Result<String
         let mut remote = repo.find_remote(&remote_name)?;
 
         let mut cb = RemoteCallbacks::new();
-        cb.credentials(|_url, username, _allowed| Cred::ssh_key_from_agent(username.unwrap()));
+        cb.credentials(|_url, username, _allowed| {
+            if let Some(username) = username {
+                Cred::ssh_key_from_agent(username)
+            } else {
+                Err(git2::Error::from_str("No username provided"))
+            }
+        });
 
         let mut fetch_options = FetchOptions::new();
         fetch_options.remote_callbacks(cb);
@@ -88,16 +94,14 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> Result<String
         let remote_ref = match repo.find_reference(&remote_branch_ref) {
             Ok(r) => r.resolve()?,
             Err(_) => {
-                return Err(Error::from_str(&format!(
-                    "Remote branch '{}' does not exist",
-                    remote_branch_ref
-                )))
+                let err_msg = format!("Remote branch '{}' does not exist", remote_branch_ref);
+                return Err(anyhow::anyhow!(err_msg));
             }
         };
 
         let remote_oid = match remote_ref.target() {
             Some(oid) => oid,
-            None => return Err(Error::from_str("Remote branch has no target")),
+            None => return Err(anyhow::anyhow!("Remote branch has no target")),
         };
 
         let remote_commit = repo.find_commit(remote_oid)?;
@@ -109,7 +113,13 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> Result<String
         let mut remote = repo.find_remote(remote_name)?;
 
         let mut cb = RemoteCallbacks::new();
-        cb.credentials(|_url, username, _allowed| Cred::ssh_key_from_agent(username.unwrap()));
+        cb.credentials(|_url, username, _allowed| {
+            if let Some(username) = username {
+                Cred::ssh_key_from_agent(username)
+            } else {
+                Err(git2::Error::from_str("No username provided"))
+            }
+        });
 
         let mut fetch_options = FetchOptions::new();
         fetch_options.remote_callbacks(cb);
@@ -124,16 +134,14 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> Result<String
         let remote_head_ref = match repo.find_reference(&remote_head_ref) {
             Ok(r) => r.resolve()?,
             Err(_) => {
-                return Err(Error::from_str(&format!(
-                    "Remote '{}' does not have HEAD",
-                    remote_name
-                )))
+                let err_msg = format!("Remote '{}' does not have HEAD", remote_name);
+                return Err(anyhow::anyhow!(err_msg));
             }
         };
 
         let remote_head_oid = match remote_head_ref.target() {
             Some(oid) => oid,
-            None => return Err(Error::from_str("Remote HEAD has no target")),
+            None => return Err(anyhow::anyhow!("Remote HEAD has no target")),
         };
 
         let remote_head_commit = repo.find_commit(remote_head_oid)?;

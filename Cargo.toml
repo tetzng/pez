@@ -22,3 +22,4 @@ clap_complete = "4.5.42"
 regex = "1.11.1"
 futures = "0.3.31"
 tokio = {version = "1.43.0", features = ["macros", "rt", "rt-multi-thread", "sync"]}
+anyhow = "1.0.95"

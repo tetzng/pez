@@ -2,25 +2,27 @@ use crate::{cli::PruneArgs, utils};
 use console::Emoji;
 use std::{fs, io, process};
 
-pub(crate) fn run(args: &PruneArgs) {
+pub(crate) fn run(args: &PruneArgs) -> anyhow::Result<()> {
     if args.dry_run {
         println!("{}Starting dry run prune process...", Emoji("🔍 ", ""));
-        dry_run(args.force);
+        dry_run(args.force)?;
         println!(
             "\n{}Dry run completed. No files have been removed.",
             Emoji("🎉 ", "")
         );
     } else {
         println!("{}Starting prune process...", Emoji("🔍 ", ""));
-        prune(args.force, args.yes);
+        prune(args.force, args.yes)?;
     }
+
+    Ok(())
 }
 
-fn prune(force: bool, yes: bool) {
-    let config_dir = utils::resolve_fish_config_dir();
-    let data_dir = utils::resolve_pez_data_dir();
-    let (config, _) = utils::ensure_config();
-    let (mut lock_file, lock_file_path) = utils::ensure_lock_file();
+fn prune(force: bool, yes: bool) -> anyhow::Result<()> {
+    let config_dir = utils::load_fish_config_dir()?;
+    let data_dir = utils::load_pez_data_dir()?;
+    let (config, _) = utils::load_or_create_config()?;
+    let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
 
     println!("{}Checking for unused plugins...", Emoji("🔍 ", ""));
 
@@ -47,7 +49,7 @@ fn prune(force: bool, yes: bool) {
             "{}No unused plugins found. Your environment is clean!",
             Emoji("🎉 ", "")
         );
-        return;
+        return Ok(());
     }
 
     if config.plugins.is_none() {
@@ -67,7 +69,7 @@ fn prune(force: bool, yes: bool) {
                 Emoji("🚧 ", "")
             );
             let mut input = String::new();
-            io::stdin().read_line(&mut input).unwrap();
+            io::stdin().read_line(&mut input)?;
             if input.trim().to_lowercase() != "y" {
                 eprintln!("{}Aborted.", Emoji("🚧 ", ""));
                 process::exit(1);
@@ -78,7 +80,7 @@ fn prune(force: bool, yes: bool) {
     for plugin in remove_plugins {
         let repo_path = data_dir.join(&plugin.repo);
         if repo_path.exists() {
-            fs::remove_dir_all(&repo_path).unwrap();
+            fs::remove_dir_all(&repo_path)?;
         } else {
             println!(
                 "{}{} Repository directory at {} does not exist.",
@@ -114,19 +116,21 @@ fn prune(force: bool, yes: bool) {
             }
         });
         lock_file.remove_plugin(&plugin.source);
-        lock_file.save(&lock_file_path);
+        lock_file.save(&lock_file_path)?;
     }
     println!(
         "\n{}All uninstalled plugins have been pruned successfully!",
         Emoji("🎉 ", "")
     );
+
+    Ok(())
 }
 
-fn dry_run(force: bool) {
-    let config_dir = utils::resolve_fish_config_dir();
-    let data_dir = utils::resolve_pez_data_dir();
-    let (config, _) = utils::ensure_config();
-    let (lock_file, _) = utils::ensure_lock_file();
+fn dry_run(force: bool) -> anyhow::Result<()> {
+    let config_dir = utils::load_fish_config_dir()?;
+    let data_dir = utils::load_pez_data_dir()?;
+    let (config, _) = utils::load_or_create_config()?;
+    let (lock_file, _) = utils::load_or_create_lock_file()?;
 
     if config.plugins.is_none() {
         println!(
@@ -199,4 +203,6 @@ fn dry_run(force: bool) {
             }
         });
     }
+
+    Ok(())
 }

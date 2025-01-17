@@ -2,33 +2,36 @@ use crate::{
     cli::{PluginRepo, UninstallArgs},
     git, utils,
 };
+use anyhow::Ok;
 use console::Emoji;
 use std::{fs, process};
 
-pub(crate) fn run(args: &UninstallArgs) {
+pub(crate) fn run(args: &UninstallArgs) -> anyhow::Result<()> {
     println!("{}Starting uninstallation process...", Emoji("🔍 ", ""));
     for plugin in &args.plugins {
         println!("\n{}Uninstalling plugin: {}", Emoji("✨ ", ""), plugin);
-        uninstall(plugin, args.force);
+        uninstall(plugin, args.force)?;
     }
     println!(
         "\n{}All specified plugins have been uninstalled successfully!",
         Emoji("🎉 ", "")
     );
+
+    Ok(())
 }
 
-pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) {
+pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result<()> {
     let plugin_repo = plugin_repo.as_str();
     let source = &git::format_git_url(&plugin_repo);
-    let config_dir = utils::resolve_fish_config_dir();
+    let config_dir = utils::load_fish_config_dir()?;
 
-    let (mut config, config_path) = utils::ensure_config();
-    let repo_path = utils::resolve_pez_data_dir().join(&plugin_repo);
-    let (mut lock_file, lock_file_path) = utils::ensure_lock_file();
+    let (mut config, config_path) = utils::load_or_create_config()?;
+    let repo_path = utils::load_pez_data_dir()?.join(&plugin_repo);
+    let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
     match lock_file.get_plugin(source) {
         Some(locked_plugin) => {
             if repo_path.exists() {
-                fs::remove_dir_all(&repo_path).unwrap();
+                fs::remove_dir_all(&repo_path)?;
             } else {
                 println!(
                     "{}{} Repository directory at {} does not exist.",
@@ -62,11 +65,11 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) {
                 }
             });
             lock_file.remove_plugin(source);
-            lock_file.save(&lock_file_path);
+            lock_file.save(&lock_file_path)?;
 
             if let Some(ref mut plugin_specs) = config.plugins {
                 plugin_specs.retain(|p| p.repo != plugin_repo);
-                config.save(&config_path);
+                config.save(&config_path)?;
             }
         }
         None => {
@@ -84,4 +87,6 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) {
         Emoji("✅ ", ""),
         plugin_repo
     );
+
+    Ok(())
 }
