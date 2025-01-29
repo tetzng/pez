@@ -35,7 +35,7 @@ async fn handle_installation(args: &InstallArgs) -> anyhow::Result<()> {
 
 async fn install(plugin_repo_list: &Vec<PluginRepo>, force: &bool) -> anyhow::Result<()> {
     let (mut config, config_path) = utils::load_or_create_config()?;
-    update_config_file(&mut config, &config_path, plugin_repo_list)?;
+    add_plugins_to_config(&mut config, &config_path, plugin_repo_list)?;
 
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
 
@@ -58,7 +58,7 @@ async fn install(plugin_repo_list: &Vec<PluginRepo>, force: &bool) -> anyhow::Re
     Ok(())
 }
 
-fn update_config_file(
+fn add_plugins_to_config(
     config: &mut config::Config,
     config_path: &path::Path,
     plugin_repo_list: &Vec<PluginRepo>,
@@ -66,10 +66,9 @@ fn update_config_file(
     match config.plugins {
         Some(ref mut plugin_specs) => {
             for plugin_repo in plugin_repo_list {
-                let repo = plugin_repo.as_str();
-                if !plugin_specs.iter().any(|p| p.repo == repo) {
+                if !plugin_specs.iter().any(|p| p.repo == *plugin_repo) {
                     plugin_specs.push(config::PluginSpec {
-                        repo: repo.to_string(),
+                        repo: plugin_repo.clone(),
                         name: None,
                         source: None,
                     });
@@ -80,7 +79,7 @@ fn update_config_file(
             let plugin_specs = plugin_repo_list
                 .iter()
                 .map(|plugin_repo| config::PluginSpec {
-                    repo: plugin_repo.as_str(),
+                    repo: plugin_repo.clone(),
                     name: None,
                     source: None,
                 })
@@ -115,7 +114,7 @@ async fn clone_plugins(
                 let repo_path = pez_data_dir.join(&plugin_repo_str);
 
                 if repo_path.exists() {
-                    handle_existing_repository(&force, &plugin_repo_str, &repo_path).unwrap();
+                    handle_existing_repository(&force, &plugin_repo, &repo_path).unwrap();
                 }
 
                 let source = &git::format_git_url(&plugin_repo_str);
@@ -143,7 +142,7 @@ async fn clone_plugins(
 
                         Plugin {
                             name: name.to_string(),
-                            repo: plugin_repo_str.clone(),
+                            repo: plugin_repo.clone(),
                             source: source.to_string(),
                             commit_sha: lock_file_plugin.commit_sha.clone(),
                             files: vec![],
@@ -153,7 +152,7 @@ async fn clone_plugins(
                         let commit_sha = git::get_latest_commit_sha(repo).unwrap();
                         Plugin {
                             name: name.to_string(),
-                            repo: plugin_repo_str.to_string(),
+                            repo: plugin_repo.clone(),
                             source: source.to_string(),
                             commit_sha,
                             files: vec![],
@@ -175,19 +174,18 @@ async fn clone_plugins(
 
 fn handle_existing_repository(
     force: &bool,
-    repo: &str,
+    repo: &PluginRepo,
     repo_path: &path::Path,
 ) -> anyhow::Result<()> {
     if *force {
         fs::remove_dir_all(repo_path)?;
     } else {
-        eprintln!(
+        anyhow::bail!(
             "{}{} Plugin already exists: {}, Use --force to reinstall",
             Emoji("❌ ", ""),
             console::style("Error:").red().bold(),
-            repo
+            repo.as_str()
         );
-        process::exit(1);
     }
     Ok(())
 }
@@ -208,7 +206,7 @@ async fn sync_plugin_files(
     let mut dest_paths = HashSet::new();
 
     for plugin in new_plugins.iter_mut() {
-        let repo_path = pez_data_dir.join(&plugin.repo);
+        let repo_path = pez_data_dir.join(plugin.repo.as_str());
         let mut target_files = Vec::new();
         let mut skip_plugin = false;
 
@@ -296,8 +294,8 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
     };
 
     for plugin_spec in plugin_specs.iter() {
-        let source = git::format_git_url(&plugin_spec.repo);
-        let repo_path = utils::load_pez_data_dir()?.join(&plugin_spec.repo);
+        let source = git::format_git_url(&plugin_spec.repo.as_str());
+        let repo_path = utils::load_pez_data_dir()?.join(plugin_spec.repo.as_str());
 
         println!(
             "\n{}Installing plugin: {}",
@@ -378,7 +376,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
         .filter(|p| {
             !plugin_specs
                 .iter()
-                .any(|spec| git::format_git_url(&spec.repo) == p.source)
+                .any(|spec| git::format_git_url(&spec.repo.as_str()) == p.source)
         })
         .cloned()
         .collect::<Vec<Plugin>>();
@@ -387,7 +385,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
         if *prune {
             for plugin in ignored_lock_file_plugins {
                 println!("\n{}Removing plugin: {}", Emoji("🐟 ", ""), &plugin.name);
-                let repo_path = utils::load_pez_data_dir()?.join(&plugin.repo);
+                let repo_path = utils::load_pez_data_dir()?.join(plugin.repo.as_str());
                 if repo_path.exists() {
                     fs::remove_dir_all(&repo_path)?;
                 } else {
@@ -441,4 +439,148 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use config::PluginSpec;
+
+    use super::*;
+    use crate::tests_support::env::TestEnvironmentSetup;
+
+    struct TestDataBuilder {
+        new_plugin_spec: PluginSpec,
+        added_plugin_spec: PluginSpec,
+    }
+
+    impl TestDataBuilder {
+        fn new() -> Self {
+            Self {
+                new_plugin_spec: PluginSpec {
+                    repo: PluginRepo {
+                        owner: "owner".to_string(),
+                        repo: "new-repo".to_string(),
+                    },
+                    name: None,
+                    source: None,
+                },
+                added_plugin_spec: PluginSpec {
+                    repo: PluginRepo {
+                        owner: "owner".to_string(),
+                        repo: "added-repo".to_string(),
+                    },
+                    name: None,
+                    source: None,
+                },
+            }
+        }
+        fn build(self) -> TestData {
+            TestData {
+                new_plugin_spec: self.new_plugin_spec,
+                added_plugin_spec: self.added_plugin_spec,
+            }
+        }
+    }
+
+    struct TestData {
+        new_plugin_spec: PluginSpec,
+        added_plugin_spec: PluginSpec,
+    }
+
+    #[test]
+    fn test_add_plugin_in_empty_config() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config { plugins: None });
+
+        let config = test_env.config.as_mut().expect("Config is not initialized");
+        let plugin_repo_list = vec![test_data.new_plugin_spec.repo];
+
+        let result = add_plugins_to_config(config, &test_env.config_path, &plugin_repo_list);
+        assert!(result.is_ok());
+
+        let updated_config = config::load(&test_env.config_path).unwrap();
+        let updated_plugin_specs = updated_config.plugins.unwrap();
+        assert_eq!(updated_plugin_specs.len(), 1);
+        assert_eq!(updated_plugin_specs[0].repo.as_str(), "owner/new-repo");
+    }
+
+    #[test]
+    fn test_add_existing_plugin_to_config() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.added_plugin_spec.clone()]),
+        });
+
+        let config = test_env.config.as_mut().expect("Config is not initialized");
+        assert_eq!(config.plugins.as_ref().unwrap().len(), 1);
+
+        let plugin_repo_list = vec![test_data.added_plugin_spec.repo];
+
+        let result = add_plugins_to_config(config, &test_env.config_path, &plugin_repo_list);
+        assert!(result.is_ok());
+
+        let updated_config = config::load(&test_env.config_path).unwrap();
+        let updated_plugin_specs = updated_config.plugins.unwrap();
+        assert_eq!(updated_plugin_specs.len(), 1);
+        assert_eq!(updated_plugin_specs[0].repo.as_str(), "owner/added-repo");
+    }
+
+    #[test]
+    fn test_add_new_plugin_to_existing_config() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.added_plugin_spec.clone()]),
+        });
+
+        let config = test_env.config.as_mut().expect("Config is not initialized");
+        assert_eq!(config.plugins.as_ref().unwrap().len(), 1);
+
+        let plugin_repo_list = vec![test_data.new_plugin_spec.repo];
+
+        let result = add_plugins_to_config(config, &test_env.config_path, &plugin_repo_list);
+        assert!(result.is_ok());
+
+        let updated_config = config::load(&test_env.config_path).unwrap();
+        let updated_plugin_specs = updated_config.plugins.unwrap();
+        assert_eq!(updated_plugin_specs.len(), 2);
+        assert!(updated_plugin_specs
+            .iter()
+            .any(|p| p.repo.as_str() == "owner/added-repo"));
+        assert!(updated_plugin_specs
+            .iter()
+            .any(|p| p.repo.as_str() == "owner/new-repo"));
+    }
+
+    #[test]
+    fn test_handle_existing_repository_with_force() {
+        let test_env = TestEnvironmentSetup::new();
+        let repo = PluginRepo {
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+        };
+        test_env.setup_data_repo(vec![repo.clone()]);
+        let repo_path = test_env.data_dir.join(repo.as_str());
+
+        let result = handle_existing_repository(&true, &repo, &repo_path);
+        assert!(result.is_ok());
+        assert!(!repo_path.exists());
+    }
+
+    #[test]
+    fn test_repository_handling_without_force() {
+        let test_env = TestEnvironmentSetup::new();
+        let repo = PluginRepo {
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+        };
+        test_env.setup_data_repo(vec![repo.clone()]);
+        let repo_path = test_env.data_dir.join(repo.as_str());
+
+        let result = handle_existing_repository(&false, &repo, &repo_path);
+        assert!(result.is_err());
+        assert!(repo_path.exists());
+    }
 }

@@ -33,14 +33,13 @@ pub(crate) fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
 }
 
 fn upgrade(plugin: &PluginRepo) -> anyhow::Result<()> {
-    let plugin = plugin.as_str();
     let (mut config, config_path) = utils::load_or_create_config()?;
 
     match config.plugins {
         Some(ref mut plugin_specs) => {
-            if !plugin_specs.iter().any(|p| p.repo == plugin) {
+            if !plugin_specs.iter().any(|p| p.repo == plugin.clone()) {
                 plugin_specs.push(PluginSpec {
-                    repo: plugin.to_string().clone(),
+                    repo: plugin.clone(),
                     name: None,
                     source: None,
                 });
@@ -49,7 +48,7 @@ fn upgrade(plugin: &PluginRepo) -> anyhow::Result<()> {
         }
         None => {
             config.plugins = Some(vec![PluginSpec {
-                repo: plugin.to_string(),
+                repo: plugin.clone(),
                 name: None,
                 source: None,
             }]);
@@ -57,7 +56,7 @@ fn upgrade(plugin: &PluginRepo) -> anyhow::Result<()> {
         }
     }
 
-    upgrade_plugin(&plugin)?;
+    upgrade_plugin(plugin)?;
 
     Ok(())
 }
@@ -74,14 +73,14 @@ fn upgrade_all() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn upgrade_plugin(plugin_repo: &str) -> anyhow::Result<()> {
+fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
-    let source = &git::format_git_url(plugin_repo);
+    let source = &git::format_git_url(&plugin_repo.as_str());
     let config_dir = utils::load_fish_config_dir()?;
 
     match lock_file.get_plugin(source) {
         Some(lock_file_plugin) => {
-            let repo_path = utils::load_pez_data_dir()?.join(&lock_file_plugin.repo);
+            let repo_path = utils::load_pez_data_dir()?.join(lock_file_plugin.repo.as_str());
             if repo_path.exists() {
                 let repo = git2::Repository::open(&repo_path)?;
                 let latest_remote_commit = git::get_latest_remote_commit(&repo)?;
@@ -105,7 +104,7 @@ fn upgrade_plugin(plugin_repo: &str) -> anyhow::Result<()> {
                 });
                 let mut updated_plugin = Plugin {
                     name: lock_file_plugin.name.to_string(),
-                    repo: plugin_repo.to_string(),
+                    repo: plugin_repo.clone(),
                     source: source.to_string(),
                     commit_sha: latest_remote_commit,
                     files: vec![],

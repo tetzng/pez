@@ -1,49 +1,93 @@
-use crate::{cli::PruneArgs, utils};
+use crate::{
+    cli::PruneArgs,
+    config,
+    lock_file::{LockFile, Plugin},
+    utils,
+};
 use console::Emoji;
-use std::{fs, io, process};
+use std::{fs, io, path};
+
+struct PruneContext<'a> {
+    fish_config_dir: &'a path::Path,
+    data_dir: &'a path::Path,
+    config: &'a config::Config,
+    lock_file: &'a mut LockFile,
+    lock_file_path: &'a path::Path,
+}
 
 pub(crate) fn run(args: &PruneArgs) -> anyhow::Result<()> {
+    let fish_config_dir = utils::load_fish_config_dir()?;
+    let data_dir = utils::load_pez_data_dir()?;
+    let (config, _) = utils::load_config()?;
+    let (mut lock_file, lock_file_path) = utils::load_lock_file()?;
+    let mut ctx = PruneContext {
+        fish_config_dir: &fish_config_dir,
+        data_dir: &data_dir,
+        config: &config,
+        lock_file: &mut lock_file,
+        lock_file_path: &lock_file_path,
+    };
+
     if args.dry_run {
         println!("{}Starting dry run prune process...", Emoji("🔍 ", ""));
-        dry_run(args.force)?;
+        dry_run(args.force, &mut ctx)?;
         println!(
             "\n{}Dry run completed. No files have been removed.",
             Emoji("🎉 ", "")
         );
     } else {
         println!("{}Starting prune process...", Emoji("🔍 ", ""));
-        prune(args.force, args.yes)?;
+        prune(args.force, args.yes, confirm_removal, &mut ctx)?;
     }
 
     Ok(())
 }
 
-fn prune(force: bool, yes: bool) -> anyhow::Result<()> {
-    let config_dir = utils::load_fish_config_dir()?;
-    let data_dir = utils::load_pez_data_dir()?;
-    let (config, _) = utils::load_or_create_config()?;
-    let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
+fn confirm_removal() -> anyhow::Result<bool> {
+    println!(
+        "{}Are you sure you want to continue? [y/N]",
+        Emoji("🚧 ", "")
+    );
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(input.trim().to_lowercase() == "y")
+}
 
+fn find_unused_plugins(
+    config: &config::Config,
+    lock_file: &LockFile,
+) -> anyhow::Result<Vec<Plugin>> {
+    if config.plugins.is_none() {
+        return Ok(lock_file.plugins.clone());
+    }
+
+    Ok(lock_file
+        .plugins
+        .iter()
+        .filter(|plugin| {
+            !config
+                .plugins
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|p| p.repo == plugin.repo)
+        })
+        .cloned()
+        .collect())
+}
+
+fn prune<F>(
+    force: bool,
+    yes: bool,
+    confirm_removal: F,
+    ctx: &mut PruneContext,
+) -> anyhow::Result<()>
+where
+    F: Fn() -> anyhow::Result<bool>,
+{
     println!("{}Checking for unused plugins...", Emoji("🔍 ", ""));
 
-    let remove_plugins: Vec<_> = if config.plugins.is_none() {
-        lock_file.plugins.clone()
-    } else {
-        lock_file
-            .plugins
-            .iter()
-            .filter(|plugin| {
-                !config
-                    .plugins
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|p| p.repo == plugin.repo)
-            })
-            .cloned()
-            .collect()
-    };
-
+    let remove_plugins: Vec<_> = find_unused_plugins(ctx.config, ctx.lock_file)?;
     if remove_plugins.is_empty() {
         println!(
             "{}No unused plugins found. Your environment is clean!",
@@ -52,7 +96,7 @@ fn prune(force: bool, yes: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    if config.plugins.is_none() {
+    if ctx.config.plugins.is_none() {
         println!(
             "{}{} No plugins are defined in pez.toml.",
             Emoji("🚧 ", ""),
@@ -63,22 +107,13 @@ fn prune(force: bool, yes: bool) -> anyhow::Result<()> {
             Emoji("🚧 ", "")
         );
 
-        if !yes {
-            println!(
-                "{}Are you sure you want to continue? [y/N]",
-                Emoji("🚧 ", "")
-            );
-            let mut input = String::new();
-            io::stdin().read_line(&mut input)?;
-            if input.trim().to_lowercase() != "y" {
-                eprintln!("{}Aborted.", Emoji("🚧 ", ""));
-                process::exit(1);
-            }
+        if !yes && !confirm_removal()? {
+            anyhow::bail!("{}Prune process aborted.", Emoji("🚧 ", ""));
         }
     }
 
     for plugin in remove_plugins {
-        let repo_path = data_dir.join(&plugin.repo);
+        let repo_path = ctx.data_dir.join(plugin.repo.as_str());
         if repo_path.exists() {
             fs::remove_dir_all(&repo_path)?;
         } else {
@@ -96,7 +131,7 @@ fn prune(force: bool, yes: bool) -> anyhow::Result<()> {
                 );
 
                 plugin.files.iter().for_each(|file| {
-                    let dest_path = file.get_path(&config_dir);
+                    let dest_path = file.get_path(ctx.fish_config_dir);
                     println!("   - {}", dest_path.display());
                 });
                 println!("If you want to remove these files, use the --force flag.");
@@ -109,14 +144,14 @@ fn prune(force: bool, yes: bool) -> anyhow::Result<()> {
             Emoji("🗑️  ", ""),
         );
         plugin.files.iter().for_each(|file| {
-            let dest_path = file.get_path(&config_dir);
+            let dest_path = file.get_path(ctx.fish_config_dir);
             if dest_path.exists() {
                 println!("   - {}", &dest_path.display());
                 fs::remove_file(&dest_path).unwrap();
             }
         });
-        lock_file.remove_plugin(&plugin.source);
-        lock_file.save(&lock_file_path)?;
+        ctx.lock_file.remove_plugin(&plugin.source);
+        ctx.lock_file.save(ctx.lock_file_path)?;
     }
     println!(
         "\n{}All uninstalled plugins have been pruned successfully!",
@@ -126,13 +161,8 @@ fn prune(force: bool, yes: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn dry_run(force: bool) -> anyhow::Result<()> {
-    let config_dir = utils::load_fish_config_dir()?;
-    let data_dir = utils::load_pez_data_dir()?;
-    let (config, _) = utils::load_or_create_config()?;
-    let (lock_file, _) = utils::load_or_create_lock_file()?;
-
-    if config.plugins.is_none() {
+fn dry_run(force: bool, ctx: &mut PruneContext) -> anyhow::Result<()> {
+    if ctx.config.plugins.is_none() {
         println!(
             "{}{} No plugins are defined in pez.toml.",
             Emoji("🚧 ", ""),
@@ -144,14 +174,14 @@ fn dry_run(force: bool) -> anyhow::Result<()> {
         );
     }
 
-    let remove_plugins: Vec<_> = if config.plugins.is_none() {
-        lock_file.plugins.clone()
+    let remove_plugins: Vec<_> = if ctx.config.plugins.is_none() {
+        ctx.lock_file.plugins.clone()
     } else {
-        lock_file
+        ctx.lock_file
             .plugins
             .iter()
             .filter(|plugin| {
-                !config
+                !ctx.config
                     .plugins
                     .as_ref()
                     .unwrap()
@@ -168,7 +198,7 @@ fn dry_run(force: bool) -> anyhow::Result<()> {
     });
 
     for plugin in remove_plugins {
-        let repo_path = data_dir.join(&plugin.repo);
+        let repo_path = ctx.data_dir.join(plugin.repo.as_str());
         if !repo_path.exists() {
             println!(
                 "{}{} Repository directory at {} does not exist.",
@@ -184,7 +214,7 @@ fn dry_run(force: bool) -> anyhow::Result<()> {
                 );
 
                 plugin.files.iter().for_each(|file| {
-                    let dest_path = file.get_path(&config_dir);
+                    let dest_path = file.get_path(ctx.fish_config_dir);
                     println!("   - {}", dest_path.display());
                 });
                 println!("If you want to remove these files, use the --force flag.");
@@ -197,7 +227,7 @@ fn dry_run(force: bool) -> anyhow::Result<()> {
             Emoji("🗑️  ", ""),
         );
         plugin.files.iter().for_each(|file| {
-            let dest_path = file.get_path(&config_dir);
+            let dest_path = file.get_path(ctx.fish_config_dir);
             if dest_path.exists() {
                 println!("   - {}", &dest_path.display());
             }
@@ -205,4 +235,359 @@ fn dry_run(force: bool) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::vec;
+
+    use super::*;
+    use crate::{
+        cli::PluginRepo,
+        lock_file::{self, PluginFile},
+        models::TargetDir,
+        tests_support::env::TestEnvironmentSetup,
+    };
+    use config::PluginSpec;
+
+    struct TestDataBuilder {
+        used_plugin: Plugin,
+        unused_plugin: Plugin,
+        used_plugin_spec: PluginSpec,
+    }
+
+    impl TestDataBuilder {
+        fn new() -> Self {
+            Self {
+                used_plugin: Plugin {
+                    name: "used-repo".to_string(),
+                    repo: PluginRepo {
+                        owner: "owner".to_string(),
+                        repo: "used-repo".to_string(),
+                    },
+                    source: "https://example.com/owner/used-repo".to_string(),
+                    commit_sha: "sha".to_string(),
+                    files: vec![PluginFile {
+                        dir: TargetDir::Functions,
+                        name: "used.fish".to_string(),
+                    }],
+                },
+                unused_plugin: Plugin {
+                    name: "unused-repo".to_string(),
+                    repo: PluginRepo {
+                        owner: "owner".to_string(),
+                        repo: "unused-repo".to_string(),
+                    },
+                    source: "https://example.com/owner/unused-repo".to_string(),
+                    commit_sha: "sha".to_string(),
+                    files: vec![PluginFile {
+                        dir: TargetDir::Functions,
+                        name: "unused.fish".to_string(),
+                    }],
+                },
+                used_plugin_spec: PluginSpec {
+                    repo: PluginRepo {
+                        owner: "owner".to_string(),
+                        repo: "used-repo".to_string(),
+                    },
+                    name: None,
+                    source: None,
+                },
+            }
+        }
+        fn build(self) -> TestData {
+            TestData {
+                used_plugin: self.used_plugin,
+                unused_plugin: self.unused_plugin,
+                used_plugin_spec: self.used_plugin_spec,
+            }
+        }
+    }
+
+    struct TestData {
+        used_plugin: Plugin,
+        unused_plugin: Plugin,
+        used_plugin_spec: PluginSpec,
+    }
+
+    impl TestEnvironmentSetup {
+        fn create_context(&mut self) -> PruneContext {
+            PruneContext {
+                fish_config_dir: &self.fish_config_dir,
+                data_dir: &self.data_dir,
+                config: self.config.as_ref().expect("Config is not initialized"),
+                lock_file: self
+                    .lock_file
+                    .as_mut()
+                    .expect("Lock file is not initialized"),
+                lock_file_path: &self.lock_file_path,
+            }
+        }
+    }
+
+    #[test]
+    fn test_find_unused_plugins() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        let ctx = test_env.create_context();
+
+        let result = find_unused_plugins(ctx.config, ctx.lock_file);
+        assert!(result.is_ok());
+
+        let unused_plugins = result.unwrap();
+        assert_eq!(unused_plugins.len(), 1, "Only one plugin should be unused");
+        assert_eq!(
+            unused_plugins[0].repo.as_str(),
+            "owner/unused-repo",
+            "owner/unused-repo should be unused"
+        );
+    }
+
+    #[test]
+    fn test_prune() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+
+        let mut ctx = test_env.create_context();
+
+        let result = prune(false, false, || Ok(false), &mut ctx);
+        assert!(result.is_ok());
+
+        let saved_lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(
+            saved_lock_file.plugins.len(),
+            1,
+            "Only one plugin should remain"
+        );
+        assert_eq!(
+            saved_lock_file.plugins[0].repo.as_str(),
+            "owner/used-repo",
+            "owner/used-repo should remain"
+        );
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/unused-repo")).is_err(),
+            "Unused repo directory should be deleted"
+        );
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/used-repo")).is_ok(),
+            "Used repo directory should still exist"
+        );
+    }
+
+    #[test]
+    fn test_prune_empty_remove_plugins() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+
+        let mut ctx = test_env.create_context();
+        let prev_plugins_len = ctx.lock_file.plugins.len();
+
+        let result = prune(false, false, || Ok(false), &mut ctx);
+        assert!(result.is_ok());
+
+        let saved_lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(
+            saved_lock_file.plugins.len(),
+            prev_plugins_len,
+            "No plugins should be removed"
+        );
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/used-repo")).is_ok(),
+            "Used repo directory should still exist"
+        );
+    }
+
+    #[test]
+    fn test_prune_empty_config_without_yes_and_confirm_removal_true() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config { plugins: None });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+
+        let mut ctx = test_env.create_context();
+
+        let result = prune(false, false, || Ok(true), &mut ctx);
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(lock_file.plugins.len(), 0, "All plugins should be removed");
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/unused-repo")).is_err(),
+            "Unused repo directory should be deleted"
+        );
+    }
+
+    #[test]
+    fn test_prune_empty_config_without_yes_and_confirm_removal_false() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config { plugins: None });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+
+        let mut ctx = test_env.create_context();
+        let prev_plugins_len = ctx.lock_file.plugins.len();
+
+        let result = prune(false, false, || Ok(false), &mut ctx);
+        assert!(result.is_err_and(|e| e.to_string().contains("Prune process aborted.")));
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(
+            lock_file.plugins.len(),
+            prev_plugins_len,
+            "No plugins should be removed"
+        );
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/unused-repo")).is_ok(),
+            "Unused repo directory should still exist"
+        );
+    }
+
+    #[test]
+    fn test_prune_empty_config_with_yes() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config { plugins: None });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+
+        let mut ctx = test_env.create_context();
+
+        let result = prune(false, true, || Ok(false), &mut ctx);
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(lock_file.plugins.len(), 0, "All plugins should be removed");
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/unused-repo")).is_err(),
+            "Unused repo directory should be deleted"
+        );
+    }
+
+    #[test]
+    fn test_prune_empty_config_missing_data_dir_with_force() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_fish_config();
+        assert!(
+            fs::metadata(test_env.fish_config_dir.join("functions/unused.fish")).is_ok(),
+            "Unused plugin file should exist"
+        );
+
+        let mut ctx = test_env.create_context();
+
+        let result = prune(true, false, || Ok(false), &mut ctx);
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(
+            lock_file.plugins.len(),
+            1,
+            "Unused plugin should be removed"
+        );
+        assert!(
+            fs::metadata(test_env.fish_config_dir.join("functions/unused.fish")).is_err(),
+            "Unused plugin file should be deleted"
+        );
+    }
+
+    #[test]
+    fn test_prune_empty_config_missing_data_dir_without_force() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_fish_config();
+
+        let mut ctx = test_env.create_context();
+
+        let result = prune(false, false, || Ok(false), &mut ctx);
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(lock_file.plugins.len(), 2, "No plugins should be removed");
+        assert!(
+            fs::metadata(test_env.fish_config_dir.join("functions/unused.fish")).is_ok(),
+            "Unused plugin file should still exist"
+        );
+    }
+
+    #[test]
+    fn test_prune_dry_run() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+
+        let mut ctx = test_env.create_context();
+
+        let result = dry_run(false, &mut ctx);
+        assert!(result.is_ok());
+
+        let saved_lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(
+            saved_lock_file.plugins.len(),
+            2,
+            "No plugins should be removed"
+        );
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/unused-repo")).is_ok(),
+            "Unused repo directory should still exist"
+        );
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/used-repo")).is_ok(),
+            "Used repo directory should still exist"
+        );
+    }
 }

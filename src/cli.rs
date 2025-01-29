@@ -1,5 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use regex::Regex;
+use serde_derive::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Parser, Debug)]
@@ -103,8 +104,8 @@ pub(crate) enum ShellType {
     Fish,
 }
 
-#[derive(Debug, Clone)]
-pub struct PluginRepo {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub(crate) struct PluginRepo {
     pub owner: String,
     pub repo: String,
 }

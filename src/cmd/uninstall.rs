@@ -21,12 +21,12 @@ pub(crate) fn run(args: &UninstallArgs) -> anyhow::Result<()> {
 }
 
 pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result<()> {
-    let plugin_repo = plugin_repo.as_str();
-    let source = &git::format_git_url(&plugin_repo);
+    let plugin_repo_str = plugin_repo.as_str();
+    let source = &git::format_git_url(&plugin_repo_str);
     let config_dir = utils::load_fish_config_dir()?;
 
     let (mut config, config_path) = utils::load_or_create_config()?;
-    let repo_path = utils::load_pez_data_dir()?.join(&plugin_repo);
+    let repo_path = utils::load_pez_data_dir()?.join(&plugin_repo_str);
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
     match lock_file.get_plugin(source) {
         Some(locked_plugin) => {
@@ -68,7 +68,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
             lock_file.save(&lock_file_path)?;
 
             if let Some(ref mut plugin_specs) = config.plugins {
-                plugin_specs.retain(|p| p.repo != plugin_repo);
+                plugin_specs.retain(|p| p.repo != plugin_repo.clone());
                 config.save(&config_path)?;
             }
         }
@@ -77,7 +77,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 "{}{} Plugin {} is not installed.",
                 Emoji("❌ ", ""),
                 console::style("Error:").red().bold(),
-                plugin_repo
+                plugin_repo_str
             );
             process::exit(1);
         }
@@ -85,7 +85,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
     println!(
         "{}Successfully uninstalled: {}",
         Emoji("✅ ", ""),
-        plugin_repo
+        plugin_repo_str
     );
 
     Ok(())

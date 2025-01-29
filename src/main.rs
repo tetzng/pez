@@ -1,20 +1,15 @@
 use clap::Parser;
 
 mod cli;
+mod cmd;
 mod config;
 mod git;
 mod lock_file;
 mod models;
 mod utils;
-pub mod cmd {
-    pub mod completion;
-    pub mod init;
-    pub mod install;
-    pub mod list;
-    pub mod prune;
-    pub mod uninstall;
-    pub mod upgrade;
-}
+
+#[cfg(test)]
+mod tests_support;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -1,14 +1,14 @@
 use serde_derive::{Deserialize, Serialize};
 use std::{fs, path};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct Config {
     pub(crate) plugins: Option<Vec<PluginSpec>>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct PluginSpec {
-    pub(crate) repo: String,
+    pub(crate) repo: crate::cli::PluginRepo,
     pub(crate) name: Option<String>,
     pub(crate) source: Option<String>,
 }
@@ -36,8 +36,7 @@ impl Config {
 impl PluginSpec {
     pub(crate) fn get_name(&self) -> anyhow::Result<String> {
         if self.name.is_none() {
-            let parts: Vec<&str> = self.repo.split("/").collect();
-            Ok(parts[parts.len() - 1].to_owned())
+            Ok(self.repo.repo.clone())
         } else {
             let name = self
                 .name

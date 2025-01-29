@@ -120,15 +120,19 @@ pub(crate) fn copy_plugin_files_from_repo(
     plugin: &mut Plugin,
 ) -> anyhow::Result<()> {
     println!("{}Copying files:", Emoji("📂 ", ""));
-    let file_count = copy_plugin_target_dirs(repo_path, plugin)?;
+    let fish_config_dir = load_fish_config_dir()?;
+    let file_count = copy_plugin_target_dirs(repo_path, &fish_config_dir, plugin)?;
     if file_count == 0 {
         warn_no_plugin_files();
     }
     Ok(())
 }
 
-fn copy_plugin_target_dirs(repo_path: &path::Path, plugin: &mut Plugin) -> anyhow::Result<usize> {
-    let config_dir = load_fish_config_dir()?;
+fn copy_plugin_target_dirs(
+    repo_path: &path::Path,
+    fish_config_dir: &path::Path,
+    plugin: &mut Plugin,
+) -> anyhow::Result<usize> {
     let target_dirs = TargetDir::all();
     let mut file_count = 0;
     for target_dir in target_dirs {
@@ -136,7 +140,7 @@ fn copy_plugin_target_dirs(repo_path: &path::Path, plugin: &mut Plugin) -> anyho
         if !target_path.exists() {
             continue;
         }
-        let dest_path = config_dir.join(target_dir.as_str());
+        let dest_path = fish_config_dir.join(target_dir.as_str());
         if !dest_path.exists() {
             fs::create_dir_all(&dest_path)?;
         }
@@ -182,4 +186,151 @@ fn warn_no_plugin_files() {
         console::style("Warning:").yellow()
     );
     println!("Ensure that it contains at least one file in 'functions', 'completions', 'conf.d', or 'themes'.");
+}
+
+#[cfg(test)]
+mod tests {
+    use config::PluginSpec;
+
+    use super::*;
+    use crate::cli::PluginRepo;
+    use crate::models::TargetDir;
+    use crate::tests_support::env::TestEnvironmentSetup;
+
+    struct TestDataBuilder {
+        plugin: Plugin,
+        plugin_spec: PluginSpec,
+    }
+
+    impl TestDataBuilder {
+        fn new() -> Self {
+            Self {
+                plugin: Plugin {
+                    name: "repo".to_string(),
+                    repo: PluginRepo {
+                        owner: "owner".to_string(),
+                        repo: "repo".to_string(),
+                    },
+                    source: "https://example.com/owner/repo".to_string(),
+                    commit_sha: "sha".to_string(),
+                    files: vec![],
+                },
+                plugin_spec: PluginSpec {
+                    repo: PluginRepo {
+                        owner: "owner".to_string(),
+                        repo: "repo".to_string(),
+                    },
+                    name: None,
+                    source: None,
+                },
+            }
+        }
+        fn build(self) -> TestData {
+            TestData {
+                plugin: self.plugin,
+                plugin_spec: self.plugin_spec,
+            }
+        }
+    }
+
+    struct TestData {
+        plugin: Plugin,
+        plugin_spec: PluginSpec,
+    }
+
+    #[test]
+    fn test_copy_plugin_files() {
+        let test_env = TestEnvironmentSetup::new();
+        let mut test_data = TestDataBuilder::new().build();
+
+        let plugin_files = vec![PluginFile {
+            dir: TargetDir::Functions,
+            name: "file.fish".to_string(),
+        }];
+        let repo = test_data.plugin_spec.repo;
+        fs::create_dir_all(test_env.data_dir.join(repo.as_str())).unwrap();
+        test_env.add_plugin_files_to_repo(&repo, &plugin_files);
+
+        let target_dir = TargetDir::Functions;
+        let target_path = test_env
+            .data_dir
+            .join(repo.as_str())
+            .join(target_dir.as_str());
+        let dest_path = test_env.fish_config_dir.join(target_dir.as_str());
+        fs::create_dir(&dest_path).unwrap();
+        assert!(dest_path.exists());
+
+        let repo_file_path = target_path.join(&plugin_files[0].name);
+        assert!(fs::read(repo_file_path).is_ok());
+
+        let files = fs::read_dir(&target_path).unwrap();
+        assert_eq!(files.count(), plugin_files.len());
+
+        let result = copy_plugin_files(
+            target_path.clone(),
+            dest_path,
+            target_dir.clone(),
+            &mut test_data.plugin,
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), plugin_files.len());
+
+        let copied_files: Vec<_> = test_env
+            .fish_config_dir
+            .join(target_dir.as_str())
+            .read_dir()
+            .unwrap()
+            .collect();
+        assert_eq!(copied_files.len(), plugin_files.len());
+
+        copied_files.into_iter().for_each(|file| {
+            let file = file.unwrap();
+            assert_eq!(file.file_name().to_string_lossy(), plugin_files[0].name);
+        });
+    }
+
+    #[test]
+    fn test_copy_plugin_files_skips_non_file_entries() {
+        let test_env = TestEnvironmentSetup::new();
+        let mut test_data = TestDataBuilder::new().build();
+
+        let repo = test_data.plugin_spec.repo;
+        let target_dir = TargetDir::Functions;
+
+        let target_path = test_env
+            .data_dir
+            .join(repo.as_str())
+            .join(target_dir.as_str());
+        let dest_path = test_env.fish_config_dir.join(target_dir.as_str());
+        fs::create_dir_all(&dest_path).unwrap();
+        assert!(dest_path.exists());
+
+        let not_func_dir = test_env
+            .data_dir
+            .join(repo.as_str())
+            .join(target_dir.as_str())
+            .join("dir");
+        fs::create_dir_all(&not_func_dir).unwrap();
+        assert!(fs::read(not_func_dir).is_err());
+
+        let files = fs::read_dir(&target_path).unwrap();
+        assert_eq!(files.count(), 1);
+
+        let result = copy_plugin_files(
+            target_path.clone(),
+            dest_path,
+            target_dir.clone(),
+            &mut test_data.plugin,
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+
+        let copied_files: Vec<_> = test_env
+            .fish_config_dir
+            .join(target_dir.as_str())
+            .read_dir()
+            .unwrap()
+            .collect();
+        assert_eq!(copied_files.len(), 0);
+    }
 }

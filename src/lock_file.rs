@@ -1,4 +1,4 @@
-use crate::models::TargetDir;
+use crate::{cli::PluginRepo, models::TargetDir};
 use anyhow::Ok;
 use serde_derive::{Deserialize, Serialize};
 use std::{fs, path, process};
@@ -16,7 +16,7 @@ pub(crate) fn init() -> LockFile {
     }
 }
 
-pub(crate) fn load(path: &path::PathBuf) -> anyhow::Result<LockFile> {
+pub(crate) fn load(path: &path::Path) -> anyhow::Result<LockFile> {
     let content = fs::read_to_string(path)?;
     let lock_file = toml::from_str(&content)?;
 
@@ -24,7 +24,7 @@ pub(crate) fn load(path: &path::PathBuf) -> anyhow::Result<LockFile> {
 }
 
 impl LockFile {
-    pub(crate) fn save(&self, path: &path::PathBuf) -> anyhow::Result<()> {
+    pub(crate) fn save(&self, path: &path::Path) -> anyhow::Result<()> {
         let contents = toml::to_string(self)?;
         fs::write(path, AUTO_GENERATED_COMMENT.to_string() + &contents)?;
 
@@ -77,7 +77,7 @@ pub(crate) const AUTO_GENERATED_COMMENT: &str =
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct Plugin {
     pub(crate) name: String,
-    pub(crate) repo: String,
+    pub(crate) repo: PluginRepo,
     pub(crate) source: String,
     pub(crate) commit_sha: String,
     pub(crate) files: Vec<PluginFile>,

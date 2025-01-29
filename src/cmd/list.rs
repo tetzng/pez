@@ -1,6 +1,7 @@
 use crate::{cli, git, lock_file::Plugin, utils};
 use anyhow::Ok;
 use console::Emoji;
+use std::io;
 use tabled::{Table, Tabled};
 
 #[derive(Debug, Tabled)]
@@ -42,21 +43,24 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
     } else {
         match args.format {
             Some(cli::ListFormat::Table) => display_plugins_in_table(plugins),
-            None => list(plugins),
+            None => list(plugins)?,
         }
     }
 
     Ok(())
 }
 
-fn list(plugins: &[Plugin]) {
-    display_plugins(plugins);
+fn list(plugins: &[Plugin]) -> anyhow::Result<()> {
+    display_plugins(plugins, io::stdout())?;
+    Ok(())
 }
 
-fn display_plugins(plugins: &[Plugin]) {
-    plugins.iter().for_each(|p| {
-        println!("{}", p.repo);
-    });
+fn display_plugins<W: io::Write>(plugins: &[Plugin], mut writer: W) -> anyhow::Result<()> {
+    for plugin in plugins {
+        writeln!(writer, "{}", plugin.repo)?;
+    }
+
+    Ok(())
 }
 
 fn display_plugins_in_table(plugins: &[Plugin]) {
@@ -64,7 +68,7 @@ fn display_plugins_in_table(plugins: &[Plugin]) {
         .iter()
         .map(|p| PluginRow {
             name: p.get_name(),
-            repo: p.repo.clone(),
+            repo: p.repo.as_str().clone(),
             source: p.source.clone(),
             commit: p.commit_sha[..7].to_string(),
         })
@@ -79,7 +83,7 @@ fn list_outdated(plugins: &[Plugin]) -> anyhow::Result<()> {
         println!("{}All plugins are up to date!", Emoji("🎉 ", ""));
         return Ok(());
     }
-    display_plugins(&outdated_plugins);
+    display_plugins(&outdated_plugins, io::stdout())?;
 
     Ok(())
 }
@@ -89,7 +93,7 @@ fn get_outdated_plugins(plugins: &[Plugin]) -> anyhow::Result<Vec<Plugin>> {
     let outdated_plugins: Vec<Plugin> = plugins
         .iter()
         .filter(|p| {
-            let repo_path = data_dir.join(&p.repo);
+            let repo_path = data_dir.join(p.repo.as_str());
             let repo = git2::Repository::open(&repo_path).unwrap();
             let latest_remote_commit = git::get_latest_remote_commit(&repo).unwrap();
             p.commit_sha != latest_remote_commit
@@ -112,11 +116,11 @@ fn list_outdated_table(plugins: &[Plugin]) -> anyhow::Result<()> {
         .iter()
         .map(|p| PluginOutdatedRow {
             name: p.get_name(),
-            repo: p.repo.clone(),
+            repo: p.repo.as_str().clone(),
             source: p.source.clone(),
             current: p.commit_sha[..7].to_string(),
             latest: {
-                let repo_path = data_dir.join(&p.repo);
+                let repo_path = data_dir.join(p.repo.as_str());
                 let repo = git2::Repository::open(&repo_path).unwrap();
                 git::get_latest_remote_commit(&repo).unwrap()[..7].to_string()
             },
@@ -126,4 +130,45 @@ fn list_outdated_table(plugins: &[Plugin]) -> anyhow::Result<()> {
     println!("{table}");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lock_file::Plugin;
+    use cli::PluginRepo;
+
+    #[test]
+    fn test_display_plugins() {
+        let plugins = vec![
+            Plugin {
+                name: "name".to_string(),
+                repo: PluginRepo {
+                    owner: "owner".to_string(),
+                    repo: "repo".to_string(),
+                },
+                source: "source".to_string(),
+                commit_sha: "commit_sha".to_string(),
+                files: vec![],
+            },
+            Plugin {
+                name: "name2".to_string(),
+                repo: PluginRepo {
+                    owner: "owner".to_string(),
+                    repo: "repo2".to_string(),
+                },
+                source: "source2".to_string(),
+                commit_sha: "commit_sha2".to_string(),
+                files: vec![],
+            },
+        ];
+
+        let mut output = io::Cursor::new(Vec::new());
+        display_plugins(&plugins, &mut output).unwrap();
+
+        let actual_output = String::from_utf8(output.into_inner()).unwrap();
+        let expected_output = "owner/repo\nowner/repo2\n";
+
+        assert_eq!(actual_output, expected_output);
+    }
 }
