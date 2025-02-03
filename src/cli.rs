@@ -105,9 +105,24 @@ pub(crate) enum ShellType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(try_from = "String", into = "String")]
 pub(crate) struct PluginRepo {
     pub owner: String,
     pub repo: String,
+}
+
+impl TryFrom<String> for PluginRepo {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl From<PluginRepo> for String {
+    fn from(plugin_repo: PluginRepo) -> Self {
+        plugin_repo.as_str()
+    }
 }
 
 impl PluginRepo {
