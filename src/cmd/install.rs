@@ -50,12 +50,29 @@ async fn install(plugin_repo_list: &Vec<PluginRepo>, force: &bool) -> anyhow::Re
     .await?;
 
     let new_plugins = sync_plugin_files(&mut new_plugins, &pez_data_dir).await?;
+
+    for plugin in &new_plugins {
+        emit_event(plugin, &utils::Event::Install)?;
+    }
+
     lock_file.merge_plugins(new_plugins);
     lock_file.save(&lock_file_path)?;
     info!(
         "{}All plugins have been installed successfully!",
         Emoji("✅ ", "")
     );
+    Ok(())
+}
+
+fn emit_event(plugin: &Plugin, event: &utils::Event) -> anyhow::Result<()> {
+    plugin
+        .files
+        .iter()
+        .filter(|f| f.dir == TargetDir::ConfD)
+        .for_each(|f| {
+            let _ = utils::emit_event(&f.name, event);
+        });
+
     Ok(())
 }
 
@@ -336,6 +353,8 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     files: vec![],
                 };
                 utils::copy_plugin_files_from_repo(&repo_path, &mut plugin)?;
+                emit_event(&plugin, &utils::Event::Install)?;
+
                 lock_file.update_plugin(plugin);
                 lock_file.save(&lock_file_path)?;
             }
@@ -364,6 +383,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     files: vec![],
                 };
                 utils::copy_plugin_files_from_repo(&repo_path, &mut plugin)?;
+                emit_event(&plugin, &utils::Event::Install)?;
 
                 lock_file.add_plugin(plugin);
                 lock_file.save(&lock_file_path)?;
@@ -417,6 +437,9 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     "{}Removing plugin files based on pez-lock.toml:",
                     Emoji("🗑️  ", ""),
                 );
+
+                emit_event(&plugin, &utils::Event::Uninstall)?;
+
                 let fish_config_dir = utils::load_fish_config_dir()?;
                 plugin.files.iter().for_each(|file| {
                     let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
