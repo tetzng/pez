@@ -183,14 +183,14 @@ fn copy_plugin_files(
 
 pub(crate) enum Event {
     Install,
-    // Update,
+    Update,
     Uninstall,
 }
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Event::Install => write!(f, "install"),
-            // Event::Update => write!(f, "update"),
+            Event::Update => write!(f, "update"),
             Event::Uninstall => write!(f, "uninstall"),
         }
     }

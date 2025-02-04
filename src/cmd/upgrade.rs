@@ -3,6 +3,7 @@ use crate::{
     config::PluginSpec,
     git,
     lock_file::Plugin,
+    models::TargetDir,
     utils,
 };
 use anyhow::Ok;
@@ -113,6 +114,16 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                 info!("{:?}", updated_plugin);
 
                 utils::copy_plugin_files_from_repo(&repo_path, &mut updated_plugin)?;
+
+                updated_plugin
+                    .files
+                    .iter()
+                    .filter(|f| f.dir == TargetDir::ConfD)
+                    .for_each(|f| {
+                        if let Err(e) = utils::emit_event(&f.name, &utils::Event::Update) {
+                            error!("Failed to emit event for {}: {:?}", &f.name, e);
+                        }
+                    });
 
                 lock_file.update_plugin(updated_plugin);
                 lock_file.save(&lock_file_path)?;
