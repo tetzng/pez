@@ -4,8 +4,8 @@ use crate::{
     models::TargetDir,
 };
 use console::Emoji;
-use std::{env, fs, path};
-use tracing::{info, warn};
+use std::{env, fmt, fs, path};
+use tracing::{debug, error, info, warn};
 
 fn home_dir() -> anyhow::Result<path::PathBuf> {
     if let Some(dir) = env::var_os("HOME") {
@@ -179,6 +179,48 @@ fn copy_plugin_files(
     }
 
     Ok(file_count)
+}
+
+pub(crate) enum Event {
+    // Install,
+    // Update,
+    Uninstall,
+}
+impl fmt::Display for Event {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // Event::Install => write!(f, "install"),
+            // Event::Update => write!(f, "update"),
+            Event::Uninstall => write!(f, "uninstall"),
+        }
+    }
+}
+
+pub(crate) fn emit_event(file_name: &str, event: &Event) -> anyhow::Result<()> {
+    let name = file_name.split('.').next();
+    match name {
+        Some(name) => {
+            let output = std::process::Command::new("fish")
+                .arg("-c")
+                .arg(format!("emit {}_{}", name, event))
+                .spawn()
+                .expect("Failed to execute process")
+                .wait_with_output()?;
+            debug!("Emitted event: {}_{}", name, event);
+
+            if !output.status.success() {
+                error!("Command executed with failing error code");
+            }
+        }
+        None => {
+            warn!(
+                "Could not extract plugin name from file name: {}",
+                file_name
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn warn_no_plugin_files() {

@@ -1,6 +1,8 @@
 use crate::{
     cli::{PluginRepo, UninstallArgs},
-    git, utils,
+    git,
+    models::TargetDir,
+    utils,
 };
 use anyhow::Ok;
 use console::Emoji;
@@ -31,6 +33,14 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
     match lock_file.get_plugin(source) {
         Some(locked_plugin) => {
+            locked_plugin
+                .files
+                .iter()
+                .filter(|f| f.dir == TargetDir::ConfD)
+                .for_each(|f| {
+                    let _ = utils::emit_event(&f.name, &utils::Event::Uninstall);
+                });
+
             if repo_path.exists() {
                 fs::remove_dir_all(&repo_path)?;
             } else {
