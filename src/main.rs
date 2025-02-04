@@ -13,6 +13,13 @@ mod tests_support;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .compact()
+        .with_level(false)
+        .with_target(false)
+        .without_time()
+        .init();
+
     let cli = cli::Cli::parse();
 
     match &cli.command {

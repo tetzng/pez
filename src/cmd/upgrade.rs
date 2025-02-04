@@ -8,14 +8,15 @@ use crate::{
 use anyhow::Ok;
 use console::Emoji;
 use std::{fs, process};
+use tracing::{error, info, warn};
 
 pub(crate) fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
-    println!("{}Starting upgrade process...", Emoji("🔍 ", ""));
+    info!("{}Starting upgrade process...", Emoji("🔍 ", ""));
     if let Some(plugins) = &args.plugins {
         for plugin in plugins {
-            println!("\n{}Upgrading plugin: {plugin}", Emoji("✨ ", ""));
+            info!("\n{}Upgrading plugin: {plugin}", Emoji("✨ ", ""));
             upgrade(plugin)?;
-            println!(
+            info!(
                 "{}Successfully upgraded plugin: {}",
                 Emoji("✅ ", ""),
                 plugin
@@ -24,7 +25,7 @@ pub(crate) fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
     } else {
         upgrade_all()?;
     }
-    println!(
+    info!(
         "\n{}All specified plugins have been upgraded successfully!",
         Emoji("🎉 ", "")
     );
@@ -65,7 +66,7 @@ fn upgrade_all() -> anyhow::Result<()> {
     let (config, _) = utils::load_or_create_config()?;
     if let Some(plugins) = &config.plugins {
         for plugin in plugins {
-            println!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &plugin.repo);
+            info!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &plugin.repo);
             upgrade_plugin(&plugin.repo)?;
         }
     }
@@ -85,7 +86,7 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                 let repo = git2::Repository::open(&repo_path)?;
                 let latest_remote_commit = git::get_latest_remote_commit(&repo)?;
                 if latest_remote_commit == lock_file_plugin.commit_sha {
-                    println!(
+                    info!(
                         "{}{} Plugin {} is already up to date.",
                         Emoji("🚀 ", ""),
                         console::style("Info:").cyan(),
@@ -109,24 +110,24 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                     commit_sha: latest_remote_commit,
                     files: vec![],
                 };
-                println!("{:?}", updated_plugin);
+                info!("{:?}", updated_plugin);
 
                 utils::copy_plugin_files_from_repo(&repo_path, &mut updated_plugin)?;
 
                 lock_file.update_plugin(updated_plugin);
                 lock_file.save(&lock_file_path)?;
             } else {
-                println!(
+                warn!(
                     "{}{} Repository directory at {} does not exist.",
                     Emoji("🚧 ", ""),
                     console::style("Warning:").yellow(),
                     &repo_path.display()
                 );
-                println!("{}You need to install the plugin first.", Emoji("🚧 ", ""),);
+                warn!("{}You need to install the plugin first.", Emoji("🚧 ", ""),);
             }
         }
         None => {
-            eprintln!(
+            error!(
                 "{}{} Plugin {} is not installed.",
                 Emoji("❌ ", ""),
                 console::style("Error:").red().bold(),

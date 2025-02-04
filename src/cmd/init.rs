@@ -1,3 +1,5 @@
+use tracing::info;
+
 use crate::utils;
 use std::{fs, path};
 
@@ -25,7 +27,7 @@ fn create_config(config_dir: &path::Path) -> anyhow::Result<()> {
 # Add more plugins below by copying the [[plugins]] block.
 "#;
     fs::write(&config_path, contents)?;
-    println!("Created {}", config_path.display());
+    info!("Created {}", config_path.display());
     Ok(())
 }
 

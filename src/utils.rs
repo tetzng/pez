@@ -5,6 +5,7 @@ use crate::{
 };
 use console::Emoji;
 use std::{env, fs, path};
+use tracing::{info, warn};
 
 fn home_dir() -> anyhow::Result<path::PathBuf> {
     if let Some(dir) = env::var_os("HOME") {
@@ -119,7 +120,7 @@ pub(crate) fn copy_plugin_files_from_repo(
     repo_path: &path::Path,
     plugin: &mut Plugin,
 ) -> anyhow::Result<()> {
-    println!("{}Copying files:", Emoji("📂 ", ""));
+    info!("{}Copying files:", Emoji("📂 ", ""));
     let fish_config_dir = load_fish_config_dir()?;
     let file_count = copy_plugin_target_dirs(repo_path, &fish_config_dir, plugin)?;
     if file_count == 0 {
@@ -166,7 +167,7 @@ fn copy_plugin_files(
         let file_name = file.file_name();
         let file_path = file.path();
         let dest_file_path = dest_path.join(&file_name);
-        println!("   - {}", dest_file_path.display());
+        info!("   - {}", dest_file_path.display());
         fs::copy(&file_path, &dest_file_path)?;
 
         let plugin_file = PluginFile {
@@ -181,11 +182,11 @@ fn copy_plugin_files(
 }
 
 fn warn_no_plugin_files() {
-    println!(
+    warn!(
         "{} No valid files found in the repository.",
         console::style("Warning:").yellow()
     );
-    println!("Ensure that it contains at least one file in 'functions', 'completions', 'conf.d', or 'themes'.");
+    warn!("Ensure that it contains at least one file in 'functions', 'completions', 'conf.d', or 'themes'.");
 }
 
 #[cfg(test)]

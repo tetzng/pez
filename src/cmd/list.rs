@@ -3,6 +3,7 @@ use anyhow::Ok;
 use console::Emoji;
 use std::io;
 use tabled::{Table, Tabled};
+use tracing::info;
 
 #[derive(Debug, Tabled)]
 struct PluginRow {
@@ -24,14 +25,14 @@ struct PluginOutdatedRow {
 pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
     let result = utils::load_lock_file();
     if result.is_err() {
-        println!("No plugins installed!");
+        info!("No plugins installed!");
         return Ok(());
     }
 
     let (lock_file, _) = result.unwrap();
     let plugins = &lock_file.plugins;
     if plugins.is_empty() {
-        println!("No plugins installed!");
+        info!("No plugins installed!");
         return Ok(());
     }
 
@@ -80,7 +81,7 @@ fn display_plugins_in_table(plugins: &[Plugin]) {
 fn list_outdated(plugins: &[Plugin]) -> anyhow::Result<()> {
     let outdated_plugins = get_outdated_plugins(plugins)?;
     if outdated_plugins.is_empty() {
-        println!("{}All plugins are up to date!", Emoji("🎉 ", ""));
+        info!("{}All plugins are up to date!", Emoji("🎉 ", ""));
         return Ok(());
     }
     display_plugins(&outdated_plugins, io::stdout())?;
@@ -108,7 +109,7 @@ fn list_outdated_table(plugins: &[Plugin]) -> anyhow::Result<()> {
     let data_dir = utils::load_pez_data_dir()?;
     let outdated_plugins = get_outdated_plugins(plugins)?;
     if outdated_plugins.is_empty() {
-        println!("{}All plugins are up to date!", Emoji("🎉 ", ""));
+        info!("{}All plugins are up to date!", Emoji("🎉 ", ""));
         return Ok(());
     }
 

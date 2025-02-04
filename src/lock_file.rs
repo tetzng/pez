@@ -2,6 +2,7 @@ use crate::{cli::PluginRepo, models::TargetDir};
 use anyhow::Ok;
 use serde_derive::{Deserialize, Serialize};
 use std::{fs, path, process};
+use tracing::error;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct LockFile {
@@ -37,7 +38,7 @@ impl LockFile {
             .iter()
             .any(|p| p.source == plugin.source || p.name == plugin.name)
         {
-            eprintln!(
+            error!(
                 "Plugin already exists: name={}, source={}",
                 plugin.name, plugin.source
             );

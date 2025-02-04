@@ -5,14 +5,15 @@ use crate::{
 use anyhow::Ok;
 use console::Emoji;
 use std::{fs, process};
+use tracing::{error, info, warn};
 
 pub(crate) fn run(args: &UninstallArgs) -> anyhow::Result<()> {
-    println!("{}Starting uninstallation process...", Emoji("🔍 ", ""));
+    info!("{}Starting uninstallation process...", Emoji("🔍 ", ""));
     for plugin in &args.plugins {
-        println!("\n{}Uninstalling plugin: {}", Emoji("✨ ", ""), plugin);
+        info!("\n{}Uninstalling plugin: {}", Emoji("✨ ", ""), plugin);
         uninstall(plugin, args.force)?;
     }
-    println!(
+    info!(
         "\n{}All specified plugins have been uninstalled successfully!",
         Emoji("🎉 ", "")
     );
@@ -33,34 +34,34 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
             if repo_path.exists() {
                 fs::remove_dir_all(&repo_path)?;
             } else {
-                println!(
+                warn!(
                     "{}{} Repository directory at {} does not exist.",
                     Emoji("🚧 ", ""),
                     console::style("Warning:").yellow(),
                     &repo_path.display()
                 );
                 if !force {
-                    println!(
+                    info!(
                         "{}Detected plugin files based on pez-lock.toml:",
                         Emoji("📄 ", ""),
                     );
                     locked_plugin.files.iter().for_each(|file| {
                         let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
-                        println!("   - {}", dest_path.display());
+                        info!("   - {}", dest_path.display());
                     });
-                    eprintln!("If you want to remove these files, use the --force flag.");
+                    error!("If you want to remove these files, use the --force flag.");
                     process::exit(1);
                 }
             }
 
-            println!(
+            info!(
                 "{}Removing plugin files based on pez-lock.toml:",
                 Emoji("🗑️  ", ""),
             );
             locked_plugin.files.iter().for_each(|file| {
                 let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
                 if dest_path.exists() {
-                    println!("   - {}", &dest_path.display());
+                    info!("   - {}", &dest_path.display());
                     fs::remove_file(&dest_path).unwrap();
                 }
             });
@@ -73,7 +74,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
             }
         }
         None => {
-            eprintln!(
+            error!(
                 "{}{} Plugin {} is not installed.",
                 Emoji("❌ ", ""),
                 console::style("Error:").red().bold(),
@@ -82,7 +83,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
             process::exit(1);
         }
     }
-    println!(
+    info!(
         "{}Successfully uninstalled: {}",
         Emoji("✅ ", ""),
         plugin_repo_str

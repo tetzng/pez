@@ -10,9 +10,10 @@ use console::Emoji;
 use futures::future;
 use std::{collections::HashSet, fs, path, process, result, sync::Arc};
 use tokio::sync::Mutex;
+use tracing::{error, info, warn};
 
 pub(crate) async fn run(args: &InstallArgs) -> anyhow::Result<()> {
-    println!("{}Starting installation process...", Emoji("🔍 ", ""));
+    info!("{}Starting installation process...", Emoji("🔍 ", ""));
 
     handle_installation(args).await?;
 
@@ -22,7 +23,7 @@ pub(crate) async fn run(args: &InstallArgs) -> anyhow::Result<()> {
 async fn handle_installation(args: &InstallArgs) -> anyhow::Result<()> {
     if let Some(plugins) = &args.plugins {
         install(plugins, &args.force).await?;
-        println!(
+        info!(
             "\n{}All specified plugins have been installed successfully!",
             Emoji("🎉 ", "")
         );
@@ -51,7 +52,7 @@ async fn install(plugin_repo_list: &Vec<PluginRepo>, force: &bool) -> anyhow::Re
     let new_plugins = sync_plugin_files(&mut new_plugins, &pez_data_dir).await?;
     lock_file.merge_plugins(new_plugins);
     lock_file.save(&lock_file_path)?;
-    println!(
+    info!(
         "{}All plugins have been installed successfully!",
         Emoji("✅ ", "")
     );
@@ -119,7 +120,7 @@ async fn clone_plugins(
 
                 let source = &git::format_git_url(&plugin_repo_str);
 
-                println!(
+                info!(
                     "{}Cloning repository from {} to {}",
                     Emoji("🔗 ", ""),
                     &source,
@@ -130,7 +131,7 @@ async fn clone_plugins(
 
                 let new_plugin = match lock_file.lock().await.get_plugin(source) {
                     Some(lock_file_plugin) => {
-                        println!(
+                        info!(
                             "{}Checking out commit sha: {}",
                             Emoji("🔄 ", ""),
                             &lock_file_plugin.commit_sha
@@ -194,7 +195,7 @@ async fn sync_plugin_files(
     new_plugins: &mut [Plugin],
     pez_data_dir: &path::Path,
 ) -> anyhow::Result<Vec<Plugin>> {
-    println!(
+    info!(
         "\n{}Copying plugin files to fish config directory...",
         Emoji("🐟 ", "")
     );
@@ -210,7 +211,7 @@ async fn sync_plugin_files(
         let mut target_files = Vec::new();
         let mut skip_plugin = false;
 
-        println!("{}Copying files:", Emoji("📂 ", ""));
+        info!("{}Copying files:", Emoji("📂 ", ""));
         for target_dir in &target_dirs {
             let target_dir_str = target_dir.as_str();
             let target_path = repo_path.join(target_dir_str);
@@ -236,7 +237,7 @@ async fn sync_plugin_files(
                 let dest_path = config_dir.join(target_dir_str).join(&file_name);
 
                 if dest_paths.contains(&dest_path) {
-                    println!(
+                    warn!(
                         "{} Skipping plugin due to duplicate: {}",
                         Emoji("🚨 ", ""),
                         plugin.repo
@@ -245,7 +246,7 @@ async fn sync_plugin_files(
                     break;
                 }
 
-                println!("   - {}", dest_path.display());
+                info!("   - {}", dest_path.display());
 
                 target_files.push(PluginFile {
                     dir: target_dir.clone(),
@@ -288,7 +289,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
     let plugin_specs = match config.plugins {
         Some(plugins) => plugins,
         None => {
-            println!("No plugins found in pez.toml");
+            info!("No plugins found in pez.toml");
             vec![]
         }
     };
@@ -297,7 +298,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
         let source = git::format_git_url(&plugin_spec.repo.as_str());
         let repo_path = utils::load_pez_data_dir()?.join(plugin_spec.repo.as_str());
 
-        println!(
+        info!(
             "\n{}Installing plugin: {}",
             Emoji("🐟 ", ""),
             &plugin_spec.repo
@@ -305,7 +306,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
         match lock_file.get_plugin(&source) {
             Some(locked_plugin) => {
                 if repo_path.exists() {
-                    println!(
+                    info!(
                         "{}Skipped: {} is already installed.",
                         Emoji("⏭️  ", ""),
                         plugin_spec.repo
@@ -314,14 +315,14 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     continue;
                 }
 
-                println!(
+                info!(
                     "{}Cloning repository from {} to {}",
                     Emoji("🔗 ", ""),
                     &source,
                     &repo_path.display()
                 );
                 let repo = git::clone_repository(&source, &repo_path)?;
-                println!(
+                info!(
                     "{}Checking out commit sha: {}",
                     Emoji("🔄 ", ""),
                     &locked_plugin.commit_sha
@@ -343,7 +344,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     if *force {
                         fs::remove_dir_all(&repo_path)?;
                     } else {
-                        eprintln!(
+                        error!(
                             "{}{} Plugin already exists: {}, Use --force to reinstall",
                             Emoji("❌ ", ""),
                             console::style("Error:").red().bold(),
@@ -384,19 +385,19 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
     if !ignored_lock_file_plugins.is_empty() {
         if *prune {
             for plugin in ignored_lock_file_plugins {
-                println!("\n{}Removing plugin: {}", Emoji("🐟 ", ""), &plugin.name);
+                info!("\n{}Removing plugin: {}", Emoji("🐟 ", ""), &plugin.name);
                 let repo_path = utils::load_pez_data_dir()?.join(plugin.repo.as_str());
                 if repo_path.exists() {
                     fs::remove_dir_all(&repo_path)?;
                 } else {
-                    println!(
+                    warn!(
                         "{}Repository directory at {} does not exist.",
                         Emoji("🚧 ", ""),
                         &repo_path.display()
                     );
 
                     if !force {
-                        println!(
+                        info!(
                             "{}Detected plugin files based on pez-lock.toml:",
                             Emoji("📄 ", ""),
                         );
@@ -405,14 +406,14 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                         plugin.files.iter().for_each(|file| {
                             let dest_path =
                                 fish_config_dir.join(file.dir.as_str()).join(&file.name);
-                            println!("   - {}", dest_path.display());
+                            info!("   - {}", dest_path.display());
                         });
-                        println!("If you want to remove these files, use the --force flag.");
+                        info!("If you want to remove these files, use the --force flag.");
                         continue;
                     }
                 }
 
-                println!(
+                info!(
                     "{}Removing plugin files based on pez-lock.toml:",
                     Emoji("🗑️  ", ""),
                 );
@@ -420,7 +421,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 plugin.files.iter().for_each(|file| {
                     let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
                     if dest_path.exists() {
-                        println!("   - {}", &dest_path.display());
+                        info!("   - {}", &dest_path.display());
                         fs::remove_file(&dest_path).unwrap();
                     }
                     lock_file.remove_plugin(&plugin.source);
@@ -428,14 +429,14 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 });
             }
         } else {
-            println!("\nNotice: The following plugins are in pez-lock.toml but not in pez.toml:");
+            info!("\nNotice: The following plugins are in pez-lock.toml but not in pez.toml:");
             for plugin in ignored_lock_file_plugins {
-                println!("  - {}", plugin.name);
+                info!("  - {}", plugin.name);
             }
-            println!("If you want to remove them completely, please run:");
-            println!("  pez install --prune");
-            println!("or:");
-            println!("  pez prune");
+            info!("If you want to remove them completely, please run:");
+            info!("  pez install --prune");
+            info!("or:");
+            info!("  pez prune");
         }
     }
     Ok(())

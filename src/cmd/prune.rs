@@ -6,6 +6,7 @@ use crate::{
 };
 use console::Emoji;
 use std::{fs, io, path};
+use tracing::{info, warn};
 
 struct PruneContext<'a> {
     fish_config_dir: &'a path::Path,
@@ -29,14 +30,14 @@ pub(crate) fn run(args: &PruneArgs) -> anyhow::Result<()> {
     };
 
     if args.dry_run {
-        println!("{}Starting dry run prune process...", Emoji("🔍 ", ""));
+        info!("{}Starting dry run prune process...", Emoji("🔍 ", ""));
         dry_run(args.force, &mut ctx)?;
-        println!(
+        info!(
             "\n{}Dry run completed. No files have been removed.",
             Emoji("🎉 ", "")
         );
     } else {
-        println!("{}Starting prune process...", Emoji("🔍 ", ""));
+        info!("{}Starting prune process...", Emoji("🔍 ", ""));
         prune(args.force, args.yes, confirm_removal, &mut ctx)?;
     }
 
@@ -44,7 +45,7 @@ pub(crate) fn run(args: &PruneArgs) -> anyhow::Result<()> {
 }
 
 fn confirm_removal() -> anyhow::Result<bool> {
-    println!(
+    warn!(
         "{}Are you sure you want to continue? [y/N]",
         Emoji("🚧 ", "")
     );
@@ -85,11 +86,11 @@ fn prune<F>(
 where
     F: Fn() -> anyhow::Result<bool>,
 {
-    println!("{}Checking for unused plugins...", Emoji("🔍 ", ""));
+    info!("{}Checking for unused plugins...", Emoji("🔍 ", ""));
 
     let remove_plugins: Vec<_> = find_unused_plugins(ctx.config, ctx.lock_file)?;
     if remove_plugins.is_empty() {
-        println!(
+        info!(
             "{}No unused plugins found. Your environment is clean!",
             Emoji("🎉 ", "")
         );
@@ -97,12 +98,12 @@ where
     }
 
     if ctx.config.plugins.is_none() {
-        println!(
+        warn!(
             "{}{} No plugins are defined in pez.toml.",
             Emoji("🚧 ", ""),
             console::style("Warning:").yellow()
         );
-        println!(
+        warn!(
             "{}All plugins defined in pez-lock.toml will be removed.",
             Emoji("🚧 ", "")
         );
@@ -117,7 +118,7 @@ where
         if repo_path.exists() {
             fs::remove_dir_all(&repo_path)?;
         } else {
-            println!(
+            warn!(
                 "{}{} Repository directory at {} does not exist.",
                 Emoji("🚧 ", ""),
                 console::style("Warning:").yellow(),
@@ -125,35 +126,35 @@ where
             );
 
             if !force {
-                println!(
+                info!(
                     "{}Detected plugin files based on pez-lock.toml:",
                     Emoji("📄 ", ""),
                 );
 
                 plugin.files.iter().for_each(|file| {
                     let dest_path = file.get_path(ctx.fish_config_dir);
-                    println!("   - {}", dest_path.display());
+                    info!("   - {}", dest_path.display());
                 });
-                println!("If you want to remove these files, use the --force flag.");
+                info!("If you want to remove these files, use the --force flag.");
                 continue;
             }
         }
 
-        println!(
+        info!(
             "{}Removing plugin files based on pez-lock.toml:",
             Emoji("🗑️  ", ""),
         );
         plugin.files.iter().for_each(|file| {
             let dest_path = file.get_path(ctx.fish_config_dir);
             if dest_path.exists() {
-                println!("   - {}", &dest_path.display());
+                info!("   - {}", &dest_path.display());
                 fs::remove_file(&dest_path).unwrap();
             }
         });
         ctx.lock_file.remove_plugin(&plugin.source);
         ctx.lock_file.save(ctx.lock_file_path)?;
     }
-    println!(
+    info!(
         "\n{}All uninstalled plugins have been pruned successfully!",
         Emoji("🎉 ", "")
     );
@@ -163,12 +164,12 @@ where
 
 fn dry_run(force: bool, ctx: &mut PruneContext) -> anyhow::Result<()> {
     if ctx.config.plugins.is_none() {
-        println!(
+        warn!(
             "{}{} No plugins are defined in pez.toml.",
             Emoji("🚧 ", ""),
             console::style("Warning:").yellow()
         );
-        println!(
+        warn!(
             "{}All plugins defined in pez-lock.toml will be removed.",
             Emoji("🚧 ", "")
         );
@@ -192,15 +193,15 @@ fn dry_run(force: bool, ctx: &mut PruneContext) -> anyhow::Result<()> {
             .collect()
     };
 
-    println!("{}Plugins that would be removed:", Emoji("🐟 ", ""));
+    info!("{}Plugins that would be removed:", Emoji("🐟 ", ""));
     remove_plugins.iter().for_each(|plugin| {
-        println!("  - {}", &plugin.repo);
+        info!("  - {}", &plugin.repo);
     });
 
     for plugin in remove_plugins {
         let repo_path = ctx.data_dir.join(plugin.repo.as_str());
         if !repo_path.exists() {
-            println!(
+            warn!(
                 "{}{} Repository directory at {} does not exist.",
                 Emoji("🚧 ", ""),
                 console::style("Warning:").yellow(),
@@ -208,28 +209,28 @@ fn dry_run(force: bool, ctx: &mut PruneContext) -> anyhow::Result<()> {
             );
 
             if !force {
-                println!(
+                info!(
                     "{}Detected plugin files based on pez-lock.toml:",
                     Emoji("📄 ", ""),
                 );
 
                 plugin.files.iter().for_each(|file| {
                     let dest_path = file.get_path(ctx.fish_config_dir);
-                    println!("   - {}", dest_path.display());
+                    info!("   - {}", dest_path.display());
                 });
-                println!("If you want to remove these files, use the --force flag.");
+                info!("If you want to remove these files, use the --force flag.");
                 continue;
             }
         }
 
-        println!(
+        info!(
             "{}Plugin files that would be removed based on pez-lock.toml:",
             Emoji("🗑️  ", ""),
         );
         plugin.files.iter().for_each(|file| {
             let dest_path = file.get_path(ctx.fish_config_dir);
             if dest_path.exists() {
-                println!("   - {}", &dest_path.display());
+                info!("   - {}", &dest_path.display());
             }
         });
     }
