@@ -137,11 +137,12 @@ async fn clone_plugins(
 
                 let source = &git::format_git_url(&plugin_repo_str);
 
+                let repo_path_display = repo_path.display();
                 info!(
                     "{}Cloning repository from {} to {}",
                     Emoji("🔗 ", ""),
                     &source,
-                    &repo_path.display()
+                    repo_path_display
                 );
                 let repo = git::clone_repository(source, &repo_path).unwrap();
                 let name = &plugin_repo.repo;
@@ -184,7 +185,9 @@ async fn clone_plugins(
 
     future::join_all(clone_tasks).await;
 
-    match Arc::try_unwrap(new_lock_plugins) {
+    let new_lock_plugins_result = Arc::try_unwrap(new_lock_plugins);
+
+    match new_lock_plugins_result {
         result::Result::Ok(new_lock_plugins) => Ok(new_lock_plugins.into_inner()),
         Err(_) => panic!("Failed to unwrap new_lock_plugins"),
     }
@@ -332,11 +335,12 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     continue;
                 }
 
+                let repo_path_display = repo_path.display();
                 info!(
                     "{}Cloning repository from {} to {}",
                     Emoji("🔗 ", ""),
                     &source,
-                    &repo_path.display()
+                    repo_path_display
                 );
                 let repo = git::clone_repository(&source, &repo_path)?;
                 info!(
@@ -410,10 +414,11 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 if repo_path.exists() {
                     fs::remove_dir_all(&repo_path)?;
                 } else {
+                    let path_display = repo_path.display();
                     warn!(
                         "{}Repository directory at {} does not exist.",
                         Emoji("🚧 ", ""),
-                        &repo_path.display()
+                        path_display
                     );
 
                     if !force {
@@ -444,7 +449,8 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 plugin.files.iter().for_each(|file| {
                     let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
                     if dest_path.exists() {
-                        info!("   - {}", &dest_path.display());
+                        let path_display = dest_path.display();
+                        info!("   - {}", path_display);
                         fs::remove_file(&dest_path).unwrap();
                     }
                     lock_file.remove_plugin(&plugin.source);
@@ -570,12 +576,16 @@ mod tests {
         let updated_config = config::load(&test_env.config_path).unwrap();
         let updated_plugin_specs = updated_config.plugins.unwrap();
         assert_eq!(updated_plugin_specs.len(), 2);
-        assert!(updated_plugin_specs
-            .iter()
-            .any(|p| p.repo.as_str() == "owner/added-repo"));
-        assert!(updated_plugin_specs
-            .iter()
-            .any(|p| p.repo.as_str() == "owner/new-repo"));
+        assert!(
+            updated_plugin_specs
+                .iter()
+                .any(|p| p.repo.as_str() == "owner/added-repo")
+        );
+        assert!(
+            updated_plugin_specs
+                .iter()
+                .any(|p| p.repo.as_str() == "owner/new-repo")
+        );
     }
 
     #[test]
