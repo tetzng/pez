@@ -576,12 +576,16 @@ mod tests {
         let updated_config = config::load(&test_env.config_path).unwrap();
         let updated_plugin_specs = updated_config.plugins.unwrap();
         assert_eq!(updated_plugin_specs.len(), 2);
-        assert!(updated_plugin_specs
-            .iter()
-            .any(|p| p.repo.as_str() == "owner/added-repo"));
-        assert!(updated_plugin_specs
-            .iter()
-            .any(|p| p.repo.as_str() == "owner/new-repo"));
+        assert!(
+            updated_plugin_specs
+                .iter()
+                .any(|p| p.repo.as_str() == "owner/added-repo")
+        );
+        assert!(
+            updated_plugin_specs
+                .iter()
+                .any(|p| p.repo.as_str() == "owner/new-repo")
+        );
     }
 
     #[test]
