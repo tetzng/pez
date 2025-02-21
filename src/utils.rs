@@ -228,7 +228,9 @@ fn warn_no_plugin_files() {
         "{} No valid files found in the repository.",
         console::style("Warning:").yellow()
     );
-    warn!("Ensure that it contains at least one file in 'functions', 'completions', 'conf.d', or 'themes'.");
+    warn!(
+        "Ensure that it contains at least one file in 'functions', 'completions', 'conf.d', or 'themes'."
+    );
 }
 
 #[cfg(test)]
