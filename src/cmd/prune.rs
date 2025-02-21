@@ -118,11 +118,12 @@ where
         if repo_path.exists() {
             fs::remove_dir_all(&repo_path)?;
         } else {
+            let path_display = repo_path.display();
             warn!(
                 "{}{} Repository directory at {} does not exist.",
                 Emoji("🚧 ", ""),
                 console::style("Warning:").yellow(),
-                &repo_path.display()
+                path_display
             );
 
             if !force {
@@ -147,7 +148,8 @@ where
         plugin.files.iter().for_each(|file| {
             let dest_path = file.get_path(ctx.fish_config_dir);
             if dest_path.exists() {
-                info!("   - {}", &dest_path.display());
+                let path_display = dest_path.display();
+                info!("   - {}", path_display);
                 fs::remove_file(&dest_path).unwrap();
             }
         });
@@ -201,11 +203,12 @@ fn dry_run(force: bool, ctx: &mut PruneContext) -> anyhow::Result<()> {
     for plugin in remove_plugins {
         let repo_path = ctx.data_dir.join(plugin.repo.as_str());
         if !repo_path.exists() {
+            let path_display = repo_path.display();
             warn!(
                 "{}{} Repository directory at {} does not exist.",
                 Emoji("🚧 ", ""),
                 console::style("Warning:").yellow(),
-                &repo_path.display()
+                path_display
             );
 
             if !force {
@@ -230,7 +233,8 @@ fn dry_run(force: bool, ctx: &mut PruneContext) -> anyhow::Result<()> {
         plugin.files.iter().for_each(|file| {
             let dest_path = file.get_path(ctx.fish_config_dir);
             if dest_path.exists() {
-                info!("   - {}", &dest_path.display());
+                let path_display = dest_path.display();
+                info!("   - {}", path_display);
             }
         });
     }

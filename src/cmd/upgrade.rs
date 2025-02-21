@@ -128,11 +128,12 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                 lock_file.update_plugin(updated_plugin);
                 lock_file.save(&lock_file_path)?;
             } else {
+                let path_display = repo_path.display();
                 warn!(
                     "{}{} Repository directory at {} does not exist.",
                     Emoji("🚧 ", ""),
                     console::style("Warning:").yellow(),
-                    &repo_path.display()
+                    path_display
                 );
                 warn!("{}You need to install the plugin first.", Emoji("🚧 ", ""),);
             }

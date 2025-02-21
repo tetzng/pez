@@ -44,11 +44,12 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
             if repo_path.exists() {
                 fs::remove_dir_all(&repo_path)?;
             } else {
+                let path_display = repo_path.display();
                 warn!(
                     "{}{} Repository directory at {} does not exist.",
                     Emoji("🚧 ", ""),
                     console::style("Warning:").yellow(),
-                    &repo_path.display()
+                    path_display
                 );
                 if !force {
                     info!(
@@ -71,7 +72,8 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
             locked_plugin.files.iter().for_each(|file| {
                 let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
                 if dest_path.exists() {
-                    info!("   - {}", &dest_path.display());
+                    let path_display = dest_path.display();
+                    info!("   - {}", path_display);
                     fs::remove_file(&dest_path).unwrap();
                 }
             });
