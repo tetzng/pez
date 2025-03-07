@@ -3,7 +3,7 @@
 > [!WARNING]
 > This project is still in development and may not be stable. Use at your own risk.
 
-A Rust-Based Plugin Manager for fish
+A Rust-Based Plugin Manager for [fish](https://fishshell.com/)
 
 ## Installation
 
@@ -165,6 +165,14 @@ using the following environment variables:
 Additionally, `pez-lock.toml` records information about the installed packages
 and the files copied. It is created in the same directory as `pez.toml`
 and will append information if it already exists.
+
+## Acknowledgements
+
+pez is inspired by the following projects:
+
+- [fisher](https://github.com/jorgebucaran/fisher)
+- [oh-my-fish](https://github.com/oh-my-fish/oh-my-fish)
+- [fundle](https://github.com/danhper/fundle)
 
 ## License
 
