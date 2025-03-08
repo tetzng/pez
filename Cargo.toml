@@ -11,7 +11,7 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4.5.31", features = ["derive"] }
-console = "0.15.10"
+console = "0.15.11"
 git2 = "0.20.0"
 serde = "1.0.217"
 serde_derive = "1.0.216"
