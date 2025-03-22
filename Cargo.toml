@@ -18,7 +18,7 @@ serde_derive = "1.0.216"
 sha2 = "0.10.8"
 tabled = "0.18.0"
 toml = "0.8.20"
-clap_complete = "4.5.46"
+clap_complete = "4.5.47"
 regex = "1.11.1"
 futures = "0.3.31"
 tokio = { version = "1.44.1", features = ["macros", "rt", "rt-multi-thread", "sync"] }
