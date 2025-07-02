@@ -46,8 +46,7 @@ fn get_remote_name(upstream: &git2::Branch) -> Result<String, Error> {
     let parts: Vec<&str> = upstream_ref.split('/').collect();
     if parts.len() < 3 {
         return Err(Error::from_str(&format!(
-            "Invalid upstream reference format: {}",
-            upstream_ref
+            "Invalid upstream reference format: {upstream_ref}"
         )));
     }
     Ok(parts[2].to_string())
@@ -90,11 +89,11 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> anyhow::Resul
             None,
         )?;
 
-        let remote_branch_ref = format!("refs/remotes/{}/{}", remote_name, branch_name);
+        let remote_branch_ref = format!("refs/remotes/{remote_name}/{branch_name}");
         let remote_ref = match repo.find_reference(&remote_branch_ref) {
             Ok(r) => r.resolve()?,
             Err(_) => {
-                let err_msg = format!("Remote branch '{}' does not exist", remote_branch_ref);
+                let err_msg = format!("Remote branch '{remote_branch_ref}' does not exist");
                 return Err(anyhow::anyhow!(err_msg));
             }
         };
@@ -130,11 +129,11 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> anyhow::Resul
             None,
         )?;
 
-        let remote_head_ref = format!("refs/remotes/{}/HEAD", remote_name);
+        let remote_head_ref = format!("refs/remotes/{remote_name}/HEAD");
         let remote_head_ref = match repo.find_reference(&remote_head_ref) {
             Ok(r) => r.resolve()?,
             Err(_) => {
-                let err_msg = format!("Remote '{}' does not have HEAD", remote_name);
+                let err_msg = format!("Remote '{remote_name}' does not have HEAD");
                 return Err(anyhow::anyhow!(err_msg));
             }
         };

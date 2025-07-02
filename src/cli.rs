@@ -150,8 +150,7 @@ impl std::str::FromStr for PluginRepo {
             })
         } else {
             Err(format!(
-                "Invalid format: {}. Expected format: <owner>/<repo>",
-                s
+                "Invalid format: {s}. Expected format: <owner>/<repo>"
             ))
         }
     }

@@ -202,7 +202,7 @@ pub(crate) fn emit_event(file_name: &str, event: &Event) -> anyhow::Result<()> {
         Some(name) => {
             let output = std::process::Command::new("fish")
                 .arg("-c")
-                .arg(format!("emit {}_{}", name, event))
+                .arg(format!("emit {name}_{event}"))
                 .spawn()
                 .expect("Failed to execute process")
                 .wait_with_output()?;

@@ -40,7 +40,7 @@ impl std::str::FromStr for TargetDir {
             "completions" => Ok(TargetDir::Completions),
             "conf.d" => Ok(TargetDir::ConfD),
             "themes" => Ok(TargetDir::Themes),
-            _ => Err(format!("Invalid target dir: {}", s)),
+            _ => Err(format!("Invalid target dir: {s}")),
         }
     }
 }
