@@ -10,7 +10,7 @@ keywords = ["fish", "plugin", "manager"]
 categories = ["command-line-utilities"]
 
 [dependencies]
-clap = { version = "4.5.40", features = ["derive"] }
+clap = { version = "4.5.41", features = ["derive"] }
 console = "0.16.0"
 git2 = "0.20.2"
 serde = "1.0.219"
