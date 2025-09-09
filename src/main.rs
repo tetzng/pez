@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
             cmd::list::run(args)?;
         }
         cli::Commands::Prune(args) => {
-            cmd::prune::run(args)?;
+            cmd::prune::run(args).await?;
         }
         cli::Commands::Doctor(args) => {
             cmd::doctor::run(args)?;

@@ -5,6 +5,7 @@ use crate::{
     utils,
 };
 use console::Emoji;
+use futures::{StreamExt, stream};
 use std::{fs, io, path};
 use tracing::{info, warn};
 
@@ -16,7 +17,7 @@ struct PruneContext<'a> {
     lock_file_path: &'a path::Path,
 }
 
-pub(crate) fn run(args: &PruneArgs) -> anyhow::Result<()> {
+pub(crate) async fn run(args: &PruneArgs) -> anyhow::Result<()> {
     let fish_config_dir = utils::load_fish_config_dir()?;
     let data_dir = utils::load_pez_data_dir()?;
     let (config, _) = utils::load_config()?;
@@ -38,7 +39,7 @@ pub(crate) fn run(args: &PruneArgs) -> anyhow::Result<()> {
         );
     } else {
         info!("{}Starting prune process...", Emoji("🔍 ", ""));
-        prune(args.force, args.yes, confirm_removal, &mut ctx)?;
+        prune_parallel(args.force, args.yes, &mut ctx).await?;
     }
 
     Ok(())
@@ -77,6 +78,7 @@ fn find_unused_plugins(
         .collect())
 }
 
+#[allow(dead_code)]
 fn prune<F>(
     force: bool,
     yes: bool,
@@ -161,6 +163,113 @@ where
         Emoji("🎉 ", "")
     );
 
+    Ok(())
+}
+
+async fn prune_parallel(force: bool, yes: bool, ctx: &mut PruneContext<'_>) -> anyhow::Result<()> {
+    info!("{}Checking for unused plugins...", Emoji("🔍 ", ""));
+
+    let remove_plugins: Vec<_> = find_unused_plugins(ctx.config, ctx.lock_file)?;
+    if remove_plugins.is_empty() {
+        info!(
+            "{}No unused plugins found. Your environment is clean!",
+            Emoji("🎉 ", "")
+        );
+        return Ok(());
+    }
+
+    if ctx.config.plugins.is_none() {
+        warn!(
+            "{}{} No plugins are defined in pez.toml.",
+            Emoji("🚧 ", ""),
+            console::style("Warning:").yellow()
+        );
+        warn!(
+            "{}All plugins defined in pez-lock.toml will be removed.",
+            Emoji("🚧 ", "")
+        );
+
+        if !yes && !confirm_removal()? {
+            anyhow::bail!("{}Prune process aborted.", Emoji("🚧 ", ""));
+        }
+    }
+
+    let jobs = utils::load_jobs();
+    let fish_config_dir = ctx.fish_config_dir.to_path_buf();
+    let data_dir = ctx.data_dir.to_path_buf();
+
+    let tasks = stream::iter(remove_plugins.iter())
+        .map(|plugin| {
+            let plugin = plugin.clone();
+            let fish_config_dir = fish_config_dir.clone();
+            let data_dir = data_dir.clone();
+            async move {
+                let repo_path = data_dir.join(plugin.repo.as_str());
+                if repo_path.exists() {
+                    tokio::task::spawn_blocking(move || fs::remove_dir_all(&repo_path))
+                        .await
+                        .unwrap()?;
+                } else {
+                    let path_display = repo_path.display();
+                    warn!(
+                        "{}{} Repository directory at {} does not exist.",
+                        Emoji("🚧 ", ""),
+                        console::style("Warning:").yellow(),
+                        path_display
+                    );
+                    if !force {
+                        info!(
+                            "{}Detected plugin files based on pez-lock.toml:",
+                            Emoji("📄 ", ""),
+                        );
+                        for file in &plugin.files {
+                            let dest_path =
+                                fish_config_dir.join(file.dir.as_str()).join(&file.name);
+                            info!("   - {}", dest_path.display());
+                        }
+                        return Ok::<Option<String>, anyhow::Error>(None);
+                    }
+                }
+
+                info!(
+                    "{}Removing plugin files based on pez-lock.toml:",
+                    Emoji("🗑️  ", ""),
+                );
+                for file in &plugin.files {
+                    let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
+                    if dest_path.exists() {
+                        let to_delete = dest_path.clone();
+                        tokio::task::spawn_blocking(move || fs::remove_file(&to_delete))
+                            .await
+                            .unwrap()
+                            .ok();
+                    }
+                }
+
+                Ok(Some(plugin.source.clone()))
+            }
+        })
+        .buffer_unordered(jobs);
+
+    let mut sources_to_remove: Vec<String> = Vec::new();
+    futures::pin_mut!(tasks);
+    while let Some(res) = tasks.next().await {
+        if let Some(source) = res? {
+            sources_to_remove.push(source);
+        }
+    }
+
+    if !sources_to_remove.is_empty() {
+        ctx.lock_file
+            .plugins
+            .retain(|p| !sources_to_remove.contains(&p.source));
+        ctx.lock_file.save(ctx.lock_file_path)?;
+    }
+
+    info!(
+        "\n{}All uninstalled plugins have been pruned successfully!",
+        Emoji("🎉 ", "")
+    );
     Ok(())
 }
 
