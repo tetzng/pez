@@ -1,6 +1,7 @@
 use crate::{cli, git, lock_file::Plugin, utils};
 use anyhow::Ok;
 use console::Emoji;
+use serde_json::json;
 use std::io;
 use tabled::{Table, Tabled};
 use tracing::info;
@@ -37,14 +38,16 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
     }
 
     if args.outdated {
-        match args.format {
-            Some(cli::ListFormat::Table) => list_outdated_table(plugins)?,
-            None => list_outdated(plugins)?,
+        match args.format.clone().unwrap_or(cli::ListFormat::Plain) {
+            cli::ListFormat::Table => list_outdated_table(plugins)?,
+            cli::ListFormat::Json => list_outdated_json(plugins)?,
+            cli::ListFormat::Plain => list_outdated(plugins)?,
         }
     } else {
-        match args.format {
-            Some(cli::ListFormat::Table) => display_plugins_in_table(plugins),
-            None => list(plugins)?,
+        match args.format.clone().unwrap_or(cli::ListFormat::Plain) {
+            cli::ListFormat::Table => display_plugins_in_table(plugins),
+            cli::ListFormat::Json => list_json(plugins)?,
+            cli::ListFormat::Plain => list(plugins)?,
         }
     }
 
@@ -130,6 +133,50 @@ fn list_outdated_table(plugins: &[Plugin]) -> anyhow::Result<()> {
     let table = Table::new(&plugin_rows);
     println!("{table}");
 
+    Ok(())
+}
+
+fn list_json(plugins: &[Plugin]) -> anyhow::Result<()> {
+    let value = json!(
+        plugins
+            .iter()
+            .map(|p| json!({
+                "name": p.get_name(),
+                "repo": p.repo.as_str(),
+                "source": p.source,
+                "commit": p.commit_sha,
+            }))
+            .collect::<Vec<_>>()
+    );
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
+}
+
+fn list_outdated_json(plugins: &[Plugin]) -> anyhow::Result<()> {
+    let data_dir = utils::load_pez_data_dir()?;
+    let outdated_plugins = get_outdated_plugins(plugins)?;
+    if outdated_plugins.is_empty() {
+        info!("{}All plugins are up to date!", Emoji("🎉 ", ""));
+        return Ok(());
+    }
+    let value = json!(
+        outdated_plugins
+            .iter()
+            .map(|p| {
+                let repo_path = data_dir.join(p.repo.as_str());
+                let repo = git2::Repository::open(&repo_path).unwrap();
+                let latest = git::get_latest_remote_commit(&repo).unwrap();
+                json!({
+                    "name": p.get_name(),
+                    "repo": p.repo.as_str(),
+                    "source": p.source,
+                    "current": p.commit_sha,
+                    "latest": latest,
+                })
+            })
+            .collect::<Vec<_>>()
+    );
+    println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }
 

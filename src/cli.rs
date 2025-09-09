@@ -96,7 +96,9 @@ pub(crate) struct PruneArgs {
 
 #[derive(Debug, Clone, clap::ValueEnum)]
 pub(crate) enum ListFormat {
+    Plain,
     Table,
+    Json,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
