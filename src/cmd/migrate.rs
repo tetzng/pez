@@ -37,7 +37,12 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
             continue;
         }
         match trimmed.parse::<crate::cli::PluginRepo>() {
-            Ok(repo) => repos.push(repo),
+            Ok(repo) => {
+                if repo.owner == "jorgebucaran" && repo.repo == "fisher" {
+                    continue;
+                }
+                repos.push(repo)
+            }
             Err(_) => warn!(
                 "{}Skipping unrecognized entry: {}",
                 Emoji("⚠ ", ""),
