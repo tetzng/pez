@@ -44,6 +44,9 @@ async fn main() -> anyhow::Result<()> {
         cli::Commands::Doctor(args) => {
             cmd::doctor::run(args)?;
         }
+        cli::Commands::Migrate(args) => {
+            cmd::migrate::run(args).await?;
+        }
         cli::Commands::Completions { shell } => match shell {
             cli::ShellType::Fish => cmd::completion::generate_completion(clap_complete::aot::Fish),
         },

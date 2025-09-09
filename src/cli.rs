@@ -38,6 +38,9 @@ pub(crate) enum Commands {
 
     /// Diagnose common setup issues
     Doctor(DoctorArgs),
+
+    /// Migrate from fisher (reads fish_plugins)
+    Migrate(MigrateArgs),
 }
 
 #[derive(Args, Debug)]
@@ -171,4 +174,18 @@ impl std::str::FromStr for PluginRepo {
             ))
         }
     }
+}
+#[derive(Args, Debug)]
+pub(crate) struct MigrateArgs {
+    /// Do not write files; print planned changes
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+
+    /// Overwrite existing pez.toml plugin list instead of merging
+    #[arg(long)]
+    pub(crate) force: bool,
+
+    /// Immediately install migrated plugins
+    #[arg(long)]
+    pub(crate) install: bool,
 }
