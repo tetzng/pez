@@ -63,10 +63,13 @@ impl TestEnvironmentSetup {
         let repo_path = self.data_dir.join(repo.as_str());
         for file in files {
             let dir = repo_path.join(file.dir.as_str());
-            if !dir.exists() {
-                fs::create_dir(&dir).unwrap();
+            let file_path = dir.join(file.name.as_str());
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            } else if !dir.exists() {
+                fs::create_dir_all(&dir).unwrap();
             }
-            fs::File::create(dir.join(file.name.as_str())).unwrap();
+            fs::File::create(file_path).unwrap();
         }
     }
 

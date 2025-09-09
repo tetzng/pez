@@ -6,6 +6,7 @@ use crate::{
 use console::Emoji;
 use std::{env, fmt, fs, path};
 use tracing::{debug, error, info, warn};
+use walkdir::WalkDir;
 
 fn home_dir() -> anyhow::Result<path::PathBuf> {
     if let Some(dir) = env::var_os("HOME") {
@@ -145,34 +146,48 @@ fn copy_plugin_target_dirs(
         if !dest_path.exists() {
             fs::create_dir_all(&dest_path)?;
         }
-        file_count += copy_plugin_files(target_path, dest_path, target_dir, plugin)?;
+        file_count +=
+            copy_plugin_files_recursive(&target_path, &dest_path, target_dir.clone(), plugin)?;
     }
     Ok(file_count)
 }
 
-fn copy_plugin_files(
-    target_path: path::PathBuf,
-    dest_path: path::PathBuf,
+fn copy_plugin_files_recursive(
+    target_path: &path::Path,
+    dest_path: &path::Path,
     target_dir: TargetDir,
     plugin: &mut Plugin,
 ) -> anyhow::Result<usize> {
-    let files = fs::read_dir(target_path)?;
     let mut file_count = 0;
+    let expected_ext = match target_dir {
+        TargetDir::Themes => Some("theme"),
+        _ => Some("fish"),
+    };
 
-    for file in files {
-        let file = file?;
-        if file.file_type()?.is_dir() {
+    for entry in WalkDir::new(target_path).into_iter().filter_map(Result::ok) {
+        let entry_path = entry.path();
+        if entry.file_type().is_dir() {
             continue;
         }
-        let file_name = file.file_name();
-        let file_path = file.path();
-        let dest_file_path = dest_path.join(&file_name);
+        if let Some(ext) = expected_ext
+            && entry_path.extension().and_then(|s| s.to_str()) != Some(ext)
+        {
+            continue;
+        }
+
+        let rel = entry_path.strip_prefix(target_path).unwrap();
+        let dest_file_path = dest_path.join(rel);
+        if let Some(parent) = dest_file_path.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent)?;
+        }
         info!("   - {}", dest_file_path.display());
-        fs::copy(&file_path, &dest_file_path)?;
+        fs::copy(entry_path, &dest_file_path)?;
 
         let plugin_file = PluginFile {
             dir: target_dir.clone(),
-            name: file_name.to_string_lossy().to_string(),
+            name: rel.to_string_lossy().to_string(),
         };
         plugin.files.push(plugin_file);
         file_count += 1;
@@ -196,17 +211,19 @@ impl fmt::Display for Event {
     }
 }
 
-pub(crate) fn emit_event(file_name: &str, event: &Event) -> anyhow::Result<()> {
-    let name = file_name.split('.').next();
-    match name {
-        Some(name) => {
+pub(crate) fn emit_event(file_name_or_path: &str, event: &Event) -> anyhow::Result<()> {
+    let stem_opt = path::Path::new(file_name_or_path)
+        .file_stem()
+        .and_then(|s| s.to_str());
+    match stem_opt {
+        Some(stem) => {
             let output = std::process::Command::new("fish")
                 .arg("-c")
-                .arg(format!("emit {name}_{event}"))
+                .arg(format!("emit {stem}_{event}"))
                 .spawn()
                 .expect("Failed to execute process")
                 .wait_with_output()?;
-            debug!("Emitted event: {}_{}", name, event);
+            debug!("Emitted event: {}_{}", stem, event);
 
             if !output.status.success() {
                 error!("Command executed with failing error code");
@@ -215,7 +232,7 @@ pub(crate) fn emit_event(file_name: &str, event: &Event) -> anyhow::Result<()> {
         None => {
             warn!(
                 "Could not extract plugin name from file name: {}",
-                file_name
+                file_name_or_path
             );
         }
     }
@@ -311,9 +328,9 @@ mod tests {
         let files = fs::read_dir(&target_path).unwrap();
         assert_eq!(files.count(), plugin_files.len());
 
-        let result = copy_plugin_files(
-            target_path.clone(),
-            dest_path,
+        let result = copy_plugin_files_recursive(
+            &target_path,
+            &dest_path,
             target_dir.clone(),
             &mut test_data.plugin,
         );
@@ -361,9 +378,9 @@ mod tests {
         let files = fs::read_dir(&target_path).unwrap();
         assert_eq!(files.count(), 1);
 
-        let result = copy_plugin_files(
-            target_path.clone(),
-            dest_path,
+        let result = copy_plugin_files_recursive(
+            &target_path,
+            &dest_path,
             target_dir.clone(),
             &mut test_data.plugin,
         );
@@ -377,5 +394,50 @@ mod tests {
             .unwrap()
             .collect();
         assert_eq!(copied_files.len(), 0);
+    }
+
+    #[test]
+    fn test_copy_plugin_files_deep_directories() {
+        let test_env = TestEnvironmentSetup::new();
+        let mut test_data = TestDataBuilder::new().build();
+
+        let plugin_files = vec![PluginFile {
+            dir: TargetDir::Functions,
+            name: "nested/dir/sample.fish".to_string(),
+        }];
+
+        let repo = test_data.plugin_spec.repo;
+        fs::create_dir_all(test_env.data_dir.join(repo.as_str())).unwrap();
+        test_env.add_plugin_files_to_repo(&repo, &plugin_files);
+
+        let target_dir = TargetDir::Functions;
+        let target_path = test_env
+            .data_dir
+            .join(repo.as_str())
+            .join(target_dir.as_str());
+        let dest_path = test_env.fish_config_dir.join(target_dir.as_str());
+        fs::create_dir_all(&dest_path).unwrap();
+
+        let result = copy_plugin_files_recursive(
+            &target_path,
+            &dest_path,
+            target_dir.clone(),
+            &mut test_data.plugin,
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1);
+
+        assert!(
+            dest_path.join("nested/dir/sample.fish").exists(),
+            "Nested file should be copied to matching path"
+        );
+
+        assert!(
+            test_data
+                .plugin
+                .files
+                .iter()
+                .any(|f| f.dir == TargetDir::Functions && f.name == "nested/dir/sample.fish")
+        );
     }
 }
