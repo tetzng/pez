@@ -239,22 +239,27 @@ async fn sync_plugin_files(
                 continue;
             }
 
-            let file_type = match target_dir {
-                TargetDir::Themes => ".theme",
-                _ => ".fish",
+            // Recursively walk and filter by extension
+            let expected_ext = match target_dir {
+                TargetDir::Themes => Some("theme"),
+                _ => Some("fish"),
             };
-            let files = fs::read_dir(target_path)?.filter(|f| {
-                f.as_ref().unwrap().file_type().unwrap().is_file()
-                    && f.as_ref()
-                        .unwrap()
-                        .file_name()
-                        .to_string_lossy()
-                        .ends_with(file_type)
-            });
 
-            for file in files {
-                let file_name = file?.file_name();
-                let dest_path = config_dir.join(target_dir_str).join(&file_name);
+            for entry in walkdir::WalkDir::new(&target_path)
+                .into_iter()
+                .filter_map(Result::ok)
+            {
+                if entry.file_type().is_dir() {
+                    continue;
+                }
+                if let Some(ext) = expected_ext
+                    && entry.path().extension().and_then(|s| s.to_str()) != Some(ext)
+                {
+                    continue;
+                }
+
+                let rel = entry.path().strip_prefix(&target_path).unwrap();
+                let dest_path = config_dir.join(target_dir_str).join(rel);
 
                 if dest_paths.contains(&dest_path) {
                     warn!(
@@ -270,7 +275,7 @@ async fn sync_plugin_files(
 
                 target_files.push(PluginFile {
                     dir: target_dir.clone(),
-                    name: file_name.to_string_lossy().to_string(),
+                    name: rel.to_string_lossy().to_string(),
                 });
 
                 dest_paths.insert(dest_path.clone());
@@ -287,6 +292,9 @@ async fn sync_plugin_files(
                 let dest_path = config_dir.join(target_dir_str).join(&f.name);
                 copy_tasks.push(tokio::spawn(async move {
                     tokio::task::spawn_blocking(move || {
+                        if let Some(parent) = dest_path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
                         fs::copy(&file_path, &dest_path).unwrap();
                     })
                     .await
