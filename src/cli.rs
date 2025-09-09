@@ -35,6 +35,9 @@ pub(crate) enum Commands {
         #[arg(value_enum)]
         shell: ShellType,
     },
+
+    /// Diagnose common setup issues
+    Doctor(DoctorArgs),
 }
 
 #[derive(Args, Debug)]
@@ -104,6 +107,18 @@ pub(crate) enum ListFormat {
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub(crate) enum ShellType {
     Fish,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct DoctorArgs {
+    /// Output format
+    #[arg(long, value_enum)]
+    pub(crate) format: Option<DoctorFormat>,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub(crate) enum DoctorFormat {
+    Json,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
