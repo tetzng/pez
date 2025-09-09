@@ -316,7 +316,7 @@ mod tests {
     }
 
     impl TestEnvironmentSetup {
-        fn create_context(&mut self) -> PruneContext {
+        fn create_context<'a>(&'a mut self) -> PruneContext<'a> {
             PruneContext {
                 fish_config_dir: &self.fish_config_dir,
                 data_dir: &self.data_dir,
