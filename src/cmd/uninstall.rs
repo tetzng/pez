@@ -6,14 +6,27 @@ use crate::{
 };
 use anyhow::Ok;
 use console::Emoji;
+use futures::{StreamExt, stream};
 use std::{fs, process};
 use tracing::{error, info, warn};
 
-pub(crate) fn run(args: &UninstallArgs) -> anyhow::Result<()> {
+pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
     info!("{}Starting uninstallation process...", Emoji("🔍 ", ""));
-    for plugin in &args.plugins {
-        info!("\n{}Uninstalling plugin: {}", Emoji("✨ ", ""), plugin);
-        uninstall(plugin, args.force)?;
+    let jobs = utils::load_jobs();
+    let tasks = stream::iter(args.plugins.iter())
+        .map(|plugin| {
+            let plugin = plugin.clone();
+            let force = args.force;
+            tokio::task::spawn_blocking(move || {
+                info!("\n{}Uninstalling plugin: {}", Emoji("✨ ", ""), &plugin);
+                uninstall(&plugin, force)
+            })
+        })
+        .buffer_unordered(jobs);
+
+    let results: Vec<_> = tasks.collect().await;
+    for r in results {
+        r??;
     }
     info!(
         "\n{}All specified plugins have been uninstalled successfully!",

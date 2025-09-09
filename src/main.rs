@@ -30,10 +30,10 @@ async fn main() -> anyhow::Result<()> {
             cmd::install::run(args).await?;
         }
         cli::Commands::Uninstall(args) => {
-            cmd::uninstall::run(args)?;
+            cmd::uninstall::run(args).await?;
         }
         cli::Commands::Upgrade(args) => {
-            cmd::upgrade::run(args)?;
+            cmd::upgrade::run(args).await?;
         }
         cli::Commands::List(args) => {
             cmd::list::run(args)?;
