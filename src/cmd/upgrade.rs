@@ -8,23 +8,37 @@ use crate::{
 };
 use anyhow::Ok;
 use console::Emoji;
+use futures::{StreamExt, stream};
 use std::{fs, process};
 use tracing::{error, info, warn};
 
-pub(crate) fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
+pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
     info!("{}Starting upgrade process...", Emoji("🔍 ", ""));
     if let Some(plugins) = &args.plugins {
-        for plugin in plugins {
-            info!("\n{}Upgrading plugin: {plugin}", Emoji("✨ ", ""));
-            upgrade(plugin)?;
-            info!(
-                "{}Successfully upgraded plugin: {}",
-                Emoji("✅ ", ""),
-                plugin
-            );
+        let jobs = utils::load_jobs();
+        let tasks = stream::iter(plugins.iter())
+            .map(|plugin| {
+                let plugin = plugin.clone();
+                tokio::task::spawn_blocking(move || {
+                    info!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &plugin);
+                    let res = upgrade(&plugin);
+                    if res.is_ok() {
+                        info!(
+                            "{}Successfully upgraded plugin: {}",
+                            Emoji("✅ ", ""),
+                            &plugin
+                        );
+                    }
+                    res
+                })
+            })
+            .buffer_unordered(jobs);
+        let results: Vec<_> = tasks.collect().await;
+        for r in results {
+            r??;
         }
     } else {
-        upgrade_all()?;
+        upgrade_all().await?;
     }
     info!(
         "\n{}All specified plugins have been upgraded successfully!",
@@ -63,12 +77,22 @@ fn upgrade(plugin: &PluginRepo) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn upgrade_all() -> anyhow::Result<()> {
+async fn upgrade_all() -> anyhow::Result<()> {
     let (config, _) = utils::load_or_create_config()?;
     if let Some(plugins) = &config.plugins {
-        for plugin in plugins {
-            info!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &plugin.repo);
-            upgrade_plugin(&plugin.repo)?;
+        let jobs = utils::load_jobs();
+        let tasks = stream::iter(plugins.iter())
+            .map(|plugin_spec| {
+                let repo = plugin_spec.repo.clone();
+                tokio::task::spawn_blocking(move || {
+                    info!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &repo);
+                    upgrade_plugin(&repo)
+                })
+            })
+            .buffer_unordered(jobs);
+        let results: Vec<_> = tasks.collect().await;
+        for r in results {
+            r??;
         }
     }
 

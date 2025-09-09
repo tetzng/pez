@@ -62,6 +62,15 @@ pub(crate) fn load_pez_data_dir() -> anyhow::Result<path::PathBuf> {
     Ok(fish_data_dir.join("pez"))
 }
 
+pub(crate) fn load_jobs() -> usize {
+    if let Ok(val) = env::var("PEZ_JOBS")
+        && let Ok(n) = val.parse::<usize>()
+    {
+        return n.max(1);
+    }
+    4
+}
+
 pub(crate) fn load_config() -> anyhow::Result<(config::Config, path::PathBuf)> {
     let config_path = load_pez_config_dir()?.join("pez.toml");
 
