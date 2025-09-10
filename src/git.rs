@@ -80,6 +80,14 @@ pub(crate) fn fetch_all(repo: &git2::Repository) -> anyhow::Result<()> {
 
 pub(crate) fn get_remote_head_commit(repo: &git2::Repository) -> anyhow::Result<String> {
     fetch_all(repo)?;
+    if let Ok(remote) = repo.find_remote("origin")
+        && let Ok(buf) = remote.default_branch()
+        && let Some(name) = buf.as_str()
+        && let Some(branch) = name.strip_prefix("refs/heads/")
+        && let Some(oid) = get_remote_branch_commit(repo, branch)?
+    {
+        return Ok(oid);
+    }
     let remote_head_ref = "refs/remotes/origin/HEAD";
     let r = repo.find_reference(remote_head_ref)?.resolve()?;
     let oid = r
@@ -151,7 +159,9 @@ pub(crate) fn resolve_selection(
             }
         }
         Selection::Commit(sha) => {
-            let obj = repo.revparse_single(sha)?;
+            let obj = repo
+                .revparse_single(sha)
+                .map_err(|e| anyhow::anyhow!("Failed to resolve commit '{sha}': {e}"))?;
             Ok(obj.peel_to_commit()?.id().to_string())
         }
         Selection::Version(v) => resolve_version(repo, v),
@@ -183,7 +193,10 @@ fn pick_tag_for_version(tags: &[String], v: &str) -> anyhow::Result<Option<Strin
         let name = t.trim();
         let name_trim = name.trim_start_matches('v');
         if let Ok(ver) = Version::parse(name_trim) {
-            semver_tags.push((ver, name.to_string()));
+            // Exclude pre-release tags by default
+            if ver.pre.is_empty() {
+                semver_tags.push((ver, name.to_string()));
+            }
         }
     }
     if !semver_tags.is_empty() {
