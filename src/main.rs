@@ -1,4 +1,6 @@
 use clap::Parser;
+use tracing::Level;
+use tracing_subscriber::EnvFilter;
 
 mod cli;
 mod cmd;
@@ -14,14 +16,25 @@ mod tests_support;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let cli = cli::Cli::parse();
+
+    // Configure logging level from -v count, or RUST_LOG if provided
+    let level = match cli.verbose {
+        0 => Level::INFO,
+        1 => Level::INFO,
+        _ => Level::DEBUG,
+    };
+    let filter = std::env::var("RUST_LOG")
+        .ok()
+        .unwrap_or_else(|| level.as_str().to_lowercase());
+
     tracing_subscriber::fmt()
         .compact()
         .with_level(false)
         .with_target(false)
         .without_time()
+        .with_env_filter(EnvFilter::new(filter))
         .init();
-
-    let cli = cli::Cli::parse();
 
     match &cli.command {
         cli::Commands::Init => {

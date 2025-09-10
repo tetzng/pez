@@ -6,6 +6,10 @@ use std::fmt;
 #[derive(Parser, Debug)]
 #[command(name = "pez", version, about, long_about = None)]
 pub(crate) struct Cli {
+    /// Increase output verbosity (-v for info, -vv for debug)
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    pub(crate) verbose: u8,
+
     #[command(subcommand)]
     pub(crate) command: Commands,
 }

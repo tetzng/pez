@@ -146,6 +146,7 @@ pub(crate) fn resolve_selection(
         Selection::DefaultHead | Selection::Latest => get_remote_head_commit(repo),
         Selection::Branch(name) => {
             if let Some(c) = get_remote_branch_commit(repo, name)? {
+                tracing::debug!(branch = name, commit = %c, "Resolved branch to commit");
                 Ok(c)
             } else {
                 anyhow::bail!(format!("Branch not found: {name}"))
@@ -153,6 +154,7 @@ pub(crate) fn resolve_selection(
         }
         Selection::Tag(t) => {
             if let Some(c) = get_tag_commit(repo, t)? {
+                tracing::debug!(tag = t, commit = %c, "Resolved tag to commit");
                 Ok(c)
             } else {
                 anyhow::bail!(format!("Tag not found: {t}"))
@@ -162,9 +164,15 @@ pub(crate) fn resolve_selection(
             let obj = repo
                 .revparse_single(sha)
                 .map_err(|e| anyhow::anyhow!("Failed to resolve commit '{sha}': {e}"))?;
-            Ok(obj.peel_to_commit()?.id().to_string())
+            let id = obj.peel_to_commit()?.id().to_string();
+            tracing::debug!(commit = %id, "Resolved explicit commit");
+            Ok(id)
         }
-        Selection::Version(v) => resolve_version(repo, v),
+        Selection::Version(v) => {
+            let id = resolve_version(repo, v)?;
+            tracing::debug!(version = v, commit = %id, "Resolved version to commit");
+            Ok(id)
+        }
     }
 }
 
@@ -205,6 +213,7 @@ fn pick_tag_for_version(tags: &[String], v: &str) -> anyhow::Result<Option<Strin
             && let Ok(want) = Version::parse(v_trim)
             && let Some((_, tag)) = semver_tags.iter().find(|(sv, _)| *sv == want)
         {
+            tracing::debug!(version = %v, tag = %tag, "Matched exact semver tag");
             return Ok(Some(tag.clone()));
         }
         let want_major = parts.first().and_then(|s| s.parse::<u64>().ok());
@@ -216,11 +225,16 @@ fn pick_tag_for_version(tags: &[String], v: &str) -> anyhow::Result<Option<Strin
                 .collect();
             if !candidates.is_empty() {
                 candidates.sort_by(|a, b| a.0.cmp(&b.0));
-                return Ok(candidates.last().map(|(_, tag)| tag.clone()));
+                let tag = candidates.last().map(|(_, tag)| tag.clone());
+                if let Some(ref t) = tag {
+                    tracing::debug!(version = %v, tag = %t, "Selected highest semver tag by prefix");
+                }
+                return Ok(tag);
             }
         }
     }
     if tags.iter().any(|t| t == v) {
+        tracing::debug!(version = %v, tag = %v, "Matched non-semver exact tag");
         return Ok(Some(v.to_string()));
     }
     let mut candidates: Vec<(Vec<u64>, String)> = Vec::new();
@@ -244,7 +258,11 @@ fn pick_tag_for_version(tags: &[String], v: &str) -> anyhow::Result<Option<Strin
     }
     if !candidates.is_empty() {
         candidates.sort_by(|a, b| a.0.cmp(&b.0));
-        return Ok(candidates.last().map(|(_, tag)| tag.clone()));
+        let tag = candidates.last().map(|(_, tag)| tag.clone());
+        if let Some(ref t) = tag {
+            tracing::debug!(version = %v, tag = %t, "Selected highest non-semver dotted suffix tag");
+        }
+        return Ok(tag);
     }
     Ok(None)
 }

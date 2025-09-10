@@ -12,7 +12,7 @@ use console::Emoji;
 use futures::future;
 use std::{fs, path, process, result, sync::Arc};
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 pub(crate) async fn run(args: &InstallArgs) -> anyhow::Result<()> {
     info!("{}Starting installation process...", Emoji("🔍 ", ""));
@@ -431,7 +431,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 } else {
                     if let Some(repo) = &repo {
                         info!(
-                            "{}Checking out commit sha: {}",
+                            "{}Using pinned commit: {}",
                             Emoji("🔄 ", ""),
                             &locked_plugin.commit_sha
                         );
@@ -441,6 +441,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     }
                     locked_plugin.commit_sha.clone()
                 };
+                debug!(repo = %repo_for_id, source = %source_base, commit = %commit_sha, "Install resolved commit");
                 let mut plugin = Plugin {
                     name: plugin_spec.get_name()?,
                     repo: repo_for_id.clone(),
