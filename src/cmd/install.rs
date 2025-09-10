@@ -1,5 +1,6 @@
+use crate::git::Selection;
 use crate::{
-    cli::{InstallArgs, PluginRepo},
+    cli::{InstallArgs, InstallTarget, PluginRepo, ResolvedInstallTarget},
     config, git,
     lock_file::{LockFile, Plugin, PluginFile},
     models::TargetDir,
@@ -34,20 +35,19 @@ async fn handle_installation(args: &InstallArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn install(plugin_repo_list: &Vec<PluginRepo>, force: &bool) -> anyhow::Result<()> {
+async fn install(targets: &[InstallTarget], force: &bool) -> anyhow::Result<()> {
     let (mut config, config_path) = utils::load_or_create_config()?;
-    add_plugins_to_config(&mut config, &config_path, plugin_repo_list)?;
+    add_plugins_to_config(&mut config, &config_path, targets)?;
 
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
 
     let pez_data_dir = utils::load_pez_data_dir()?;
-    let mut new_plugins = clone_plugins(
-        plugin_repo_list.iter().collect(),
-        *force,
-        lock_file.clone(),
-        &pez_data_dir,
-    )
-    .await?;
+    let resolved: Vec<ResolvedInstallTarget> = targets
+        .iter()
+        .map(|t| t.resolve())
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let mut new_plugins =
+        clone_plugins(&resolved, *force, lock_file.clone(), &pez_data_dir).await?;
 
     let new_plugins = sync_plugin_files(&mut new_plugins, &pez_data_dir).await?;
 
@@ -79,27 +79,63 @@ fn emit_event(plugin: &Plugin, event: &utils::Event) -> anyhow::Result<()> {
 fn add_plugins_to_config(
     config: &mut config::Config,
     config_path: &path::Path,
-    plugin_repo_list: &Vec<PluginRepo>,
+    targets: &[InstallTarget],
 ) -> anyhow::Result<()> {
+    let resolved: Vec<ResolvedInstallTarget> = targets
+        .iter()
+        .map(|t| t.resolve())
+        .collect::<anyhow::Result<Vec<_>>>()?;
     match config.plugins {
         Some(ref mut plugin_specs) => {
-            for plugin_repo in plugin_repo_list {
-                if !plugin_specs.iter().any(|p| p.repo == *plugin_repo) {
-                    plugin_specs.push(config::PluginSpec {
-                        repo: plugin_repo.clone(),
-                        name: None,
-                        source: None,
-                    });
+            for r in &resolved {
+                if !plugin_specs
+                    .iter()
+                    .any(|p| p.get_plugin_repo().is_ok_and(|pr| pr == r.plugin_repo))
+                {
+                    let default_source = format!("https://github.com/{}", r.plugin_repo.as_str());
+                    let spec = if r.is_local {
+                        config::PluginSpec {
+                            name: None,
+                            source: config::PluginSource::Path {
+                                path: r.source.clone(),
+                            },
+                        }
+                    } else if r.source == default_source {
+                        config::PluginSpec {
+                            name: None,
+                            source: ref_kind_to_repo_source(r),
+                        }
+                    } else {
+                        config::PluginSpec {
+                            name: None,
+                            source: ref_kind_to_url_source(r),
+                        }
+                    };
+                    plugin_specs.push(spec);
                 }
             }
         }
         None => {
-            let plugin_specs = plugin_repo_list
-                .iter()
-                .map(|plugin_repo| config::PluginSpec {
-                    repo: plugin_repo.clone(),
-                    name: None,
-                    source: None,
+            let plugin_specs = resolved
+                .into_iter()
+                .map(|r| {
+                    let default_source = format!("https://github.com/{}", r.plugin_repo.as_str());
+                    if r.is_local {
+                        config::PluginSpec {
+                            name: None,
+                            source: config::PluginSource::Path { path: r.source },
+                        }
+                    } else if r.source == default_source {
+                        config::PluginSpec {
+                            name: None,
+                            source: ref_kind_to_repo_source(&r),
+                        }
+                    } else {
+                        config::PluginSpec {
+                            name: None,
+                            source: ref_kind_to_url_source(&r),
+                        }
+                    }
                 })
                 .collect();
             config.plugins = Some(plugin_specs);
@@ -111,7 +147,7 @@ fn add_plugins_to_config(
 }
 
 async fn clone_plugins(
-    plugin_repo_list: Vec<&PluginRepo>,
+    resolved_targets: &[ResolvedInstallTarget],
     force: bool,
     lock_file: LockFile,
     pez_data_dir: &path::Path,
@@ -119,15 +155,16 @@ async fn clone_plugins(
     let lock_file = Arc::new(Mutex::new(lock_file));
     let new_lock_plugins: Arc<Mutex<Vec<Plugin>>> = Arc::new(Mutex::new(vec![]));
 
-    let clone_tasks: Vec<_> = plugin_repo_list
-        .into_iter()
-        .map(|plugin_repo| {
-            let plugin_repo = plugin_repo.clone();
+    let clone_tasks: Vec<_> = resolved_targets
+        .iter()
+        .cloned()
+        .map(|resolved| {
             let new_lock_plugins = Arc::clone(&new_lock_plugins);
             let lock_file = Arc::clone(&lock_file);
             let pez_data_dir = pez_data_dir.to_path_buf();
 
             tokio::spawn(async move {
+                let plugin_repo = resolved.plugin_repo.clone();
                 let plugin_repo_str = plugin_repo.as_str();
                 let repo_path = pez_data_dir.join(&plugin_repo_str);
 
@@ -135,44 +172,93 @@ async fn clone_plugins(
                     handle_existing_repository(&force, &plugin_repo, &repo_path).unwrap();
                 }
 
-                let source = &git::format_git_url(&plugin_repo_str);
+                let base_source = resolved.source.clone();
 
                 let repo_path_display = repo_path.display();
                 info!(
                     "{}Cloning repository from {} to {}",
                     Emoji("🔗 ", ""),
-                    &source,
+                    &base_source,
                     repo_path_display
                 );
-                let repo = git::clone_repository(source, &repo_path).unwrap();
+                if resolved.is_local {
+                    // Local source; skip clone. We'll copy files from `base_source` later in sync.
+                    let name = &plugin_repo.repo;
+                    let new_plugin = Plugin {
+                        name: name.to_string(),
+                        repo: plugin_repo.clone(),
+                        source: base_source.clone(),
+                        commit_sha: "local".to_string(),
+                        files: vec![],
+                    };
+                    new_lock_plugins.lock().await.push(new_plugin);
+                    return;
+                }
+
+                let repo = git::clone_repository(&base_source, &repo_path).unwrap();
                 let name = &plugin_repo.repo;
-
-                let new_plugin = match lock_file.lock().await.get_plugin(source) {
-                    Some(lock_file_plugin) => {
-                        info!(
-                            "{}Checking out commit sha: {}",
-                            Emoji("🔄 ", ""),
-                            &lock_file_plugin.commit_sha
-                        );
-                        repo.set_head_detached(
-                            git2::Oid::from_str(&lock_file_plugin.commit_sha).unwrap(),
-                        )
-                        .unwrap();
-
-                        Plugin {
-                            name: name.to_string(),
-                            repo: plugin_repo.clone(),
-                            source: source.to_string(),
-                            commit_sha: lock_file_plugin.commit_sha.clone(),
-                            files: vec![],
+                let new_plugin = {
+                    let locked_opt = lock_file
+                        .lock()
+                        .await
+                        .get_plugin_by_repo(&plugin_repo)
+                        .cloned();
+                    if let Some(lock_file_plugin) = locked_opt {
+                        if !force {
+                            info!(
+                                "{}Checking out commit sha: {}",
+                                Emoji("🔄 ", ""),
+                                &lock_file_plugin.commit_sha
+                            );
+                            repo.set_head_detached(
+                                git2::Oid::from_str(&lock_file_plugin.commit_sha).unwrap(),
+                            )
+                            .unwrap();
+                            Plugin {
+                                name: name.to_string(),
+                                repo: plugin_repo.clone(),
+                                source: base_source.clone(),
+                                commit_sha: lock_file_plugin.commit_sha.clone(),
+                                files: vec![],
+                            }
+                        } else {
+                            // force: resolve newest according to ref_kind
+                            let sel = selection_from_ref_kind(&resolved.ref_kind);
+                            let commit_sha = match git::resolve_selection(&repo, &sel) {
+                                std::result::Result::Ok(sha) => sha,
+                                Err(e) => {
+                                    warn!(
+                                        "Failed to resolve selection: {:?}. Falling back to HEAD.",
+                                        e
+                                    );
+                                    git::get_latest_commit_sha(repo).unwrap()
+                                }
+                            };
+                            Plugin {
+                                name: name.to_string(),
+                                repo: plugin_repo.clone(),
+                                source: base_source.clone(),
+                                commit_sha,
+                                files: vec![],
+                            }
                         }
-                    }
-                    None => {
-                        let commit_sha = git::get_latest_commit_sha(repo).unwrap();
+                    } else {
+                        // fresh install: resolve selection
+                        let sel = selection_from_ref_kind(&resolved.ref_kind);
+                        let commit_sha = match git::resolve_selection(&repo, &sel) {
+                            std::result::Result::Ok(sha) => sha,
+                            Err(e) => {
+                                warn!(
+                                    "Failed to resolve selection: {:?}. Falling back to HEAD.",
+                                    e
+                                );
+                                git::get_latest_commit_sha(repo).unwrap()
+                            }
+                        };
                         Plugin {
                             name: name.to_string(),
                             repo: plugin_repo.clone(),
-                            source: source.to_string(),
+                            source: base_source.clone(),
                             commit_sha,
                             files: vec![],
                         }
@@ -227,7 +313,11 @@ async fn sync_plugin_files(
     let mut dest_paths = HashSet::new();
 
     for plugin in new_plugins.iter_mut() {
-        let repo_path = pez_data_dir.join(plugin.repo.as_str());
+        let repo_path = if git::is_local_source(&plugin.source) {
+            path::PathBuf::from(&plugin.source)
+        } else {
+            pez_data_dir.join(plugin.repo.as_str())
+        };
         let mut target_files = Vec::new();
         let mut skip_plugin = false;
 
@@ -310,6 +400,111 @@ async fn sync_plugin_files(
     Ok(new_plugins.to_vec())
 }
 
+fn selection_from_ref_kind(kind: &crate::cli::RefKind) -> Selection {
+    match kind {
+        crate::cli::RefKind::None => Selection::DefaultHead,
+        crate::cli::RefKind::Latest => Selection::Latest,
+        crate::cli::RefKind::Version(v) => Selection::Version(v.clone()),
+        crate::cli::RefKind::Tag(t) => Selection::Tag(t.clone()),
+        crate::cli::RefKind::Branch(b) => Selection::Branch(b.clone()),
+        crate::cli::RefKind::Commit(c) => Selection::Commit(c.clone()),
+    }
+}
+
+fn ref_kind_to_repo_source(r: &ResolvedInstallTarget) -> config::PluginSource {
+    match &r.ref_kind {
+        crate::cli::RefKind::None => config::PluginSource::Repo {
+            repo: r.plugin_repo.clone(),
+            version: None,
+            branch: None,
+            tag: None,
+            commit: None,
+        },
+        crate::cli::RefKind::Latest => config::PluginSource::Repo {
+            repo: r.plugin_repo.clone(),
+            version: Some("latest".to_string()),
+            branch: None,
+            tag: None,
+            commit: None,
+        },
+        crate::cli::RefKind::Version(v) => config::PluginSource::Repo {
+            repo: r.plugin_repo.clone(),
+            version: Some(v.clone()),
+            branch: None,
+            tag: None,
+            commit: None,
+        },
+        crate::cli::RefKind::Tag(t) => config::PluginSource::Repo {
+            repo: r.plugin_repo.clone(),
+            version: None,
+            branch: None,
+            tag: Some(t.clone()),
+            commit: None,
+        },
+        crate::cli::RefKind::Branch(b) => config::PluginSource::Repo {
+            repo: r.plugin_repo.clone(),
+            version: None,
+            branch: Some(b.clone()),
+            tag: None,
+            commit: None,
+        },
+        crate::cli::RefKind::Commit(c) => config::PluginSource::Repo {
+            repo: r.plugin_repo.clone(),
+            version: None,
+            branch: None,
+            tag: None,
+            commit: Some(c.clone()),
+        },
+    }
+}
+
+fn ref_kind_to_url_source(r: &ResolvedInstallTarget) -> config::PluginSource {
+    match &r.ref_kind {
+        crate::cli::RefKind::None => config::PluginSource::Url {
+            url: r.source.clone(),
+            version: None,
+            branch: None,
+            tag: None,
+            commit: None,
+        },
+        crate::cli::RefKind::Latest => config::PluginSource::Url {
+            url: r.source.clone(),
+            version: Some("latest".to_string()),
+            branch: None,
+            tag: None,
+            commit: None,
+        },
+        crate::cli::RefKind::Version(v) => config::PluginSource::Url {
+            url: r.source.clone(),
+            version: Some(v.clone()),
+            branch: None,
+            tag: None,
+            commit: None,
+        },
+        crate::cli::RefKind::Tag(t) => config::PluginSource::Url {
+            url: r.source.clone(),
+            version: None,
+            branch: None,
+            tag: Some(t.clone()),
+            commit: None,
+        },
+        crate::cli::RefKind::Branch(b) => config::PluginSource::Url {
+            url: r.source.clone(),
+            version: None,
+            branch: Some(b.clone()),
+            tag: None,
+            commit: None,
+        },
+        crate::cli::RefKind::Commit(c) => config::PluginSource::Url {
+            url: r.source.clone(),
+            version: None,
+            branch: None,
+            tag: None,
+            commit: Some(c.clone()),
+        },
+    }
+}
+
 fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
     let (config, _) = utils::load_config()?;
@@ -323,21 +518,20 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
     };
 
     for plugin_spec in plugin_specs.iter() {
-        let source = git::format_git_url(&plugin_spec.repo.as_str());
-        let repo_path = utils::load_pez_data_dir()?.join(plugin_spec.repo.as_str());
+        let resolved = plugin_spec.to_resolved()?;
+        let repo_for_id = resolved.plugin_repo.clone();
+        let source_base = resolved.source.clone();
+        let ref_kind = resolved.ref_kind.clone();
+        let repo_path = utils::load_pez_data_dir()?.join(repo_for_id.as_str());
 
-        info!(
-            "\n{}Installing plugin: {}",
-            Emoji("🐟 ", ""),
-            &plugin_spec.repo
-        );
-        match lock_file.get_plugin(&source) {
+        info!("\n{}Installing plugin: {}", Emoji("🐟 ", ""), &repo_for_id);
+        match lock_file.get_plugin_by_repo(&repo_for_id) {
             Some(locked_plugin) => {
-                if repo_path.exists() {
+                if repo_path.exists() && !*force {
                     info!(
                         "{}Skipped: {} is already installed.",
                         Emoji("⏭️  ", ""),
-                        plugin_spec.repo
+                        repo_for_id
                     );
 
                     continue;
@@ -347,31 +541,61 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 info!(
                     "{}Cloning repository from {} to {}",
                     Emoji("🔗 ", ""),
-                    &source,
+                    &source_base,
                     repo_path_display
                 );
-                let repo = git::clone_repository(&source, &repo_path)?;
-                info!(
-                    "{}Checking out commit sha: {}",
-                    Emoji("🔄 ", ""),
-                    &locked_plugin.commit_sha
-                );
-                repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha)?)?;
+                // For local path sources, cloning is not applicable
+                let repo = if git::is_local_source(&source_base) {
+                    None
+                } else {
+                    Some(git::clone_repository(&source_base, &repo_path)?)
+                };
+                let commit_sha = if *force {
+                    if let Some(repo) = &repo {
+                        let sel = selection_from_ref_kind(&ref_kind);
+                        match git::resolve_selection(repo, &sel) {
+                            std::result::Result::Ok(sha) => sha,
+                            Err(e) => {
+                                warn!(
+                                    "Failed to resolve selection: {:?}. Falling back to pinned.",
+                                    e
+                                );
+                                locked_plugin.commit_sha.clone()
+                            }
+                        }
+                    } else {
+                        "local".to_string()
+                    }
+                } else {
+                    if let Some(repo) = &repo {
+                        info!(
+                            "{}Checking out commit sha: {}",
+                            Emoji("🔄 ", ""),
+                            &locked_plugin.commit_sha
+                        );
+                        repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha)?)?;
+                    }
+                    locked_plugin.commit_sha.clone()
+                };
                 let mut plugin = Plugin {
                     name: plugin_spec.get_name()?,
-                    repo: plugin_spec.repo.clone(),
-                    source: source.to_string(),
-                    commit_sha: locked_plugin.commit_sha.clone(),
+                    repo: repo_for_id.clone(),
+                    source: source_base.to_string(),
+                    commit_sha,
                     files: vec![],
                 };
-                utils::copy_plugin_files_from_repo(&repo_path, &mut plugin)?;
+                if git::is_local_source(&source_base) {
+                    utils::copy_plugin_files_from_repo(path::Path::new(&source_base), &mut plugin)?;
+                } else {
+                    utils::copy_plugin_files_from_repo(&repo_path, &mut plugin)?;
+                }
                 emit_event(&plugin, &utils::Event::Install)?;
 
                 lock_file.update_plugin(plugin);
                 lock_file.save(&lock_file_path)?;
             }
             None => {
-                if repo_path.exists() {
+                if repo_path.exists() && !git::is_local_source(&source_base) {
                     if *force {
                         fs::remove_dir_all(&repo_path)?;
                     } else {
@@ -379,22 +603,45 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                             "{}{} Plugin already exists: {}, Use --force to reinstall",
                             Emoji("❌ ", ""),
                             console::style("Error:").red().bold(),
-                            plugin_spec.repo
+                            repo_for_id
                         );
                         process::exit(1);
                     }
                 }
 
-                let repo = git2::Repository::clone(&source, &repo_path)?;
-                let commit_sha = git::get_latest_commit_sha(repo)?;
+                let commit_sha = if git::is_local_source(&source_base) {
+                    info!(
+                        "{}Installing from local path: {}",
+                        Emoji("📁 ", ""),
+                        &source_base
+                    );
+                    "local".to_string()
+                } else {
+                    let repo = git::clone_repository(&source_base, &repo_path)?;
+                    let sel = selection_from_ref_kind(&ref_kind);
+                    match git::resolve_selection(&repo, &sel) {
+                        std::result::Result::Ok(sha) => sha,
+                        Err(e) => {
+                            warn!(
+                                "Failed to resolve selection: {:?}. Falling back to HEAD.",
+                                e
+                            );
+                            git::get_latest_commit_sha(repo)?
+                        }
+                    }
+                };
                 let mut plugin = Plugin {
                     name: plugin_spec.get_name()?,
-                    repo: plugin_spec.repo.clone(),
-                    source: source.to_string(),
+                    repo: repo_for_id.clone(),
+                    source: source_base.to_string(),
                     commit_sha,
                     files: vec![],
                 };
-                utils::copy_plugin_files_from_repo(&repo_path, &mut plugin)?;
+                if git::is_local_source(&source_base) {
+                    utils::copy_plugin_files_from_repo(path::Path::new(&source_base), &mut plugin)?;
+                } else {
+                    utils::copy_plugin_files_from_repo(&repo_path, &mut plugin)?;
+                }
                 emit_event(&plugin, &utils::Event::Install)?;
 
                 lock_file.add_plugin(plugin);
@@ -409,7 +656,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
         .filter(|p| {
             !plugin_specs
                 .iter()
-                .any(|spec| git::format_git_url(&spec.repo.as_str()) == p.source)
+                .any(|spec| spec.get_plugin_repo().is_ok_and(|r| r == p.repo))
         })
         .cloned()
         .collect::<Vec<Plugin>>();
@@ -481,7 +728,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use config::PluginSpec;
+    use config::{PluginSource, PluginSpec};
 
     use super::*;
     use crate::tests_support::env::TestEnvironmentSetup;
@@ -495,20 +742,30 @@ mod tests {
         fn new() -> Self {
             Self {
                 new_plugin_spec: PluginSpec {
-                    repo: PluginRepo {
-                        owner: "owner".to_string(),
-                        repo: "new-repo".to_string(),
-                    },
                     name: None,
-                    source: None,
+                    source: PluginSource::Repo {
+                        repo: PluginRepo {
+                            owner: "owner".to_string(),
+                            repo: "new-repo".to_string(),
+                        },
+                        version: None,
+                        branch: None,
+                        tag: None,
+                        commit: None,
+                    },
                 },
                 added_plugin_spec: PluginSpec {
-                    repo: PluginRepo {
-                        owner: "owner".to_string(),
-                        repo: "added-repo".to_string(),
-                    },
                     name: None,
-                    source: None,
+                    source: PluginSource::Repo {
+                        repo: PluginRepo {
+                            owner: "owner".to_string(),
+                            repo: "added-repo".to_string(),
+                        },
+                        version: None,
+                        branch: None,
+                        tag: None,
+                        commit: None,
+                    },
                 },
             }
         }
@@ -521,6 +778,7 @@ mod tests {
     }
 
     struct TestData {
+        #[allow(dead_code)]
         new_plugin_spec: PluginSpec,
         added_plugin_spec: PluginSpec,
     }
@@ -528,19 +786,22 @@ mod tests {
     #[test]
     fn test_add_plugin_in_empty_config() {
         let mut test_env = TestEnvironmentSetup::new();
-        let test_data = TestDataBuilder::new().build();
+        let _test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config { plugins: None });
 
         let config = test_env.config.as_mut().expect("Config is not initialized");
-        let plugin_repo_list = vec![test_data.new_plugin_spec.repo];
+        let targets = vec![crate::cli::InstallTarget::from_raw("owner/new-repo")];
 
-        let result = add_plugins_to_config(config, &test_env.config_path, &plugin_repo_list);
+        let result = add_plugins_to_config(config, &test_env.config_path, &targets);
         assert!(result.is_ok());
 
         let updated_config = config::load(&test_env.config_path).unwrap();
         let updated_plugin_specs = updated_config.plugins.unwrap();
         assert_eq!(updated_plugin_specs.len(), 1);
-        assert_eq!(updated_plugin_specs[0].repo.as_str(), "owner/new-repo");
+        assert_eq!(
+            updated_plugin_specs[0].get_plugin_repo().unwrap().as_str(),
+            "owner/new-repo"
+        );
     }
 
     #[test]
@@ -554,15 +815,18 @@ mod tests {
         let config = test_env.config.as_mut().expect("Config is not initialized");
         assert_eq!(config.plugins.as_ref().unwrap().len(), 1);
 
-        let plugin_repo_list = vec![test_data.added_plugin_spec.repo];
+        let targets = vec![crate::cli::InstallTarget::from_raw("owner/added-repo")];
 
-        let result = add_plugins_to_config(config, &test_env.config_path, &plugin_repo_list);
+        let result = add_plugins_to_config(config, &test_env.config_path, &targets);
         assert!(result.is_ok());
 
         let updated_config = config::load(&test_env.config_path).unwrap();
         let updated_plugin_specs = updated_config.plugins.unwrap();
         assert_eq!(updated_plugin_specs.len(), 1);
-        assert_eq!(updated_plugin_specs[0].repo.as_str(), "owner/added-repo");
+        assert_eq!(
+            updated_plugin_specs[0].get_plugin_repo().unwrap().as_str(),
+            "owner/added-repo"
+        );
     }
 
     #[test]
@@ -576,24 +840,24 @@ mod tests {
         let config = test_env.config.as_mut().expect("Config is not initialized");
         assert_eq!(config.plugins.as_ref().unwrap().len(), 1);
 
-        let plugin_repo_list = vec![test_data.new_plugin_spec.repo];
+        let targets = vec![crate::cli::InstallTarget::from_raw("owner/new-repo")];
 
-        let result = add_plugins_to_config(config, &test_env.config_path, &plugin_repo_list);
+        let result = add_plugins_to_config(config, &test_env.config_path, &targets);
         assert!(result.is_ok());
 
         let updated_config = config::load(&test_env.config_path).unwrap();
         let updated_plugin_specs = updated_config.plugins.unwrap();
         assert_eq!(updated_plugin_specs.len(), 2);
-        assert!(
-            updated_plugin_specs
-                .iter()
-                .any(|p| p.repo.as_str() == "owner/added-repo")
-        );
-        assert!(
-            updated_plugin_specs
-                .iter()
-                .any(|p| p.repo.as_str() == "owner/new-repo")
-        );
+        assert!(updated_plugin_specs.iter().any(|p| {
+            p.get_plugin_repo()
+                .map(|r| r.as_str() == "owner/added-repo")
+                .unwrap_or(false)
+        }));
+        assert!(updated_plugin_specs.iter().any(|p| {
+            p.get_plugin_repo()
+                .map(|r| r.as_str() == "owner/new-repo")
+                .unwrap_or(false)
+        }));
     }
 
     #[test]
