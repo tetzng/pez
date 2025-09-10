@@ -23,10 +23,17 @@ cargo install --path .
 # 1) Initialize configuration (creates pez.toml)
 pez init
 
-# 2) Add a plugin to pez.toml
-#    Minimal example:
+# 2) Add a plugin to pez.toml (repo/url/path のいずれか)
 #    [[plugins]]
-#    repo = "owner/repo"
+#    repo = "owner/repo"      # GitHub shorthand
+#    # version = "v3"        # Or: tag = "...", branch = "...", commit = "..."
+#
+#    # [[plugins]]
+#    # url = "https://gitlab.com/owner/repo"  # Any Git host URL
+#    # branch = "main"
+#
+#    # [[plugins]]
+#    # path = "~/path/to/local/plugin"       # Local directory (absolute or ~/ only)
 
 # 3) Install plugins listed in pez.toml
 pez install
@@ -47,7 +54,7 @@ pez completions fish > ~/.config/fish/completions/pez.fish
 ## Usage
 
 ```fish
-Usage: pez <COMMAND>
+Usage: pez [OPTIONS] <COMMAND>
 
 Commands:
 init         Initialize pez
@@ -62,8 +69,9 @@ migrate      Migrate from fisher (reads fish_plugins)
 help         Print this message or the help of the given subcommand(s)
 
 Options:
--h, --help     Print help
--V, --version  Print version
+  -v, --verbose  Increase output verbosity (-v for info, -vv for debug)
+  -h, --help     Print help
+  -V, --version  Print version
 ```
 
 ### init
@@ -182,16 +190,29 @@ Configuration File Locations
 The configuration files are located based on the following priority:
 `$PEZ_CONFIG_DIR` > `$__fish_config_dir` > `$XDG_CONFIG_HOME/fish` > `~/.config/fish`
 
-### pez.toml
+### pez.toml（新スキーマ）
 
 `pez.toml` is the primary configuration file where you define the plugins
 you want to manage. Below is an example structure:
 
 ```toml
+# GitHub shorthand
 [[plugins]]
-repo = "owner/repo" # The plugin repository in the format <owner>/<repo>
+repo = "owner/repo"
+# version = "latest"   # default if omitted
+# version = "v3"       # branch or tag name; branches preferred over tags
+# branch  = "develop"
+# tag     = "v1.0.0"
+# commit  = "<sha>"    # 7+ chars recommended (unique per repo)
 
-# Add additional plugins by copying the [[plugins]] block.
+# Generic Git host URL
+[[plugins]]
+url = "https://gitlab.com/owner/repo"
+# branch = "main"
+
+# Local path (absolute or ~/ only)
+[[plugins]]
+path = "~/path/to/local/plugin"
 ```
 
 ### pez-lock.toml
