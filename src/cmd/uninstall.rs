@@ -3,10 +3,10 @@ use crate::{
     models::TargetDir,
     utils,
 };
-use anyhow::Ok;
+
 use console::Emoji;
 use futures::{StreamExt, stream};
-use std::{fs, process};
+use std::fs;
 use tracing::{error, info, warn};
 
 pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
@@ -73,7 +73,9 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                         info!("   - {}", dest_path.display());
                     });
                     error!("If you want to remove these files, use the --force flag.");
-                    process::exit(1);
+                    anyhow::bail!(
+                        "Repository directory does not exist. Use --force to remove files listed in lock file"
+                    );
                 }
             }
 
@@ -104,7 +106,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 console::style("Error:").red().bold(),
                 plugin_repo_str
             );
-            process::exit(1);
+            anyhow::bail!("Plugin is not installed: {}", plugin_repo_str);
         }
     }
     info!(

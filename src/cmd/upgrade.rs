@@ -6,7 +6,7 @@ use crate::{
     models::TargetDir,
     utils,
 };
-use anyhow::Ok;
+
 use console::Emoji;
 use futures::{StreamExt, stream};
 use std::{fs, process};
@@ -170,7 +170,9 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                         }
                     });
 
-                lock_file.update_plugin(updated_plugin);
+                if let Err(e) = lock_file.update_plugin(updated_plugin) {
+                    warn!("Failed to update lock file: {:?}", e);
+                }
                 lock_file.save(&lock_file_path)?;
             } else {
                 let path_display = repo_path.display();

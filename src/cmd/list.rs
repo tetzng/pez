@@ -1,5 +1,5 @@
 use crate::{cli, git, lock_file::Plugin, utils};
-use anyhow::Ok;
+
 use console::Emoji;
 use serde_json::json;
 use std::io;
@@ -30,7 +30,13 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let (lock_file, _) = result.unwrap();
+    let (lock_file, _) = match result {
+        Ok(v) => v,
+        Err(_) => {
+            info!("No plugins installed!");
+            return Ok(());
+        }
+    };
     let plugins = &lock_file.plugins;
     if plugins.is_empty() {
         info!("No plugins installed!");
@@ -98,8 +104,13 @@ fn get_outdated_plugins(plugins: &[Plugin]) -> anyhow::Result<Vec<Plugin>> {
         .iter()
         .filter(|p| {
             let repo_path = data_dir.join(p.repo.as_str());
-            let repo = git2::Repository::open(&repo_path).unwrap();
-            let latest_remote_commit = git::get_latest_remote_commit(&repo).unwrap();
+            let latest_remote_commit = match git2::Repository::open(&repo_path)
+                .ok()
+                .and_then(|r| git::get_latest_remote_commit(&r).ok())
+            {
+                Some(s) => s,
+                None => return false,
+            };
             p.commit_sha != latest_remote_commit
         })
         .cloned()
@@ -125,8 +136,13 @@ fn list_outdated_table(plugins: &[Plugin]) -> anyhow::Result<()> {
             current: p.commit_sha[..7].to_string(),
             latest: {
                 let repo_path = data_dir.join(p.repo.as_str());
-                let repo = git2::Repository::open(&repo_path).unwrap();
-                git::get_latest_remote_commit(&repo).unwrap()[..7].to_string()
+                match git2::Repository::open(&repo_path)
+                    .ok()
+                    .and_then(|r| git::get_latest_remote_commit(&r).ok())
+                {
+                    Some(s) => s[..7].to_string(),
+                    None => "—".to_string(),
+                }
             },
         })
         .collect::<Vec<PluginOutdatedRow>>();
@@ -164,8 +180,10 @@ fn list_outdated_json(plugins: &[Plugin]) -> anyhow::Result<()> {
             .iter()
             .map(|p| {
                 let repo_path = data_dir.join(p.repo.as_str());
-                let repo = git2::Repository::open(&repo_path).unwrap();
-                let latest = git::get_latest_remote_commit(&repo).unwrap();
+                let latest = git2::Repository::open(&repo_path)
+                    .ok()
+                    .and_then(|r| git::get_latest_remote_commit(&r).ok())
+                    .unwrap_or_default();
                 json!({
                     "name": p.get_name(),
                     "repo": p.repo.as_str(),
