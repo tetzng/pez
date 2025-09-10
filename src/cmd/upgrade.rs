@@ -9,7 +9,7 @@ use crate::{
 
 use console::Emoji;
 use futures::{StreamExt, stream};
-use std::{fs, process};
+use std::fs;
 use tracing::{error, info, warn};
 
 pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
@@ -186,13 +186,7 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
             }
         }
         None => {
-            error!(
-                "{}{} Plugin {} is not installed.",
-                Emoji("❌ ", ""),
-                console::style("Error:").red().bold(),
-                plugin_repo
-            );
-            process::exit(1);
+            anyhow::bail!("Plugin is not installed: {}", plugin_repo);
         }
     }
 
