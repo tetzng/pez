@@ -5,7 +5,7 @@ use crate::{
 };
 use anyhow::Context;
 use console::Emoji;
-use std::{env, fmt, fs, path};
+use std::{collections::HashSet, env, fmt, fs, path};
 use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
 
@@ -133,35 +133,108 @@ pub(crate) fn copy_plugin_files_from_repo(
 ) -> anyhow::Result<()> {
     info!("{}Copying files:", Emoji("📂 ", ""));
     let fish_config_dir = load_fish_config_dir()?;
-    let file_count = copy_plugin_target_dirs(repo_path, &fish_config_dir, plugin)?;
+    let outcome = copy_plugin_files(repo_path, &fish_config_dir, plugin, None, false)?;
+    let file_count = outcome.file_count;
     if file_count == 0 {
         warn_no_plugin_files();
     }
     Ok(())
 }
 
-fn copy_plugin_target_dirs(
+#[derive(Debug, Default, Clone)]
+pub(crate) struct CopyOutcome {
+    pub file_count: usize,
+    pub skipped_due_to_duplicate: bool,
+}
+
+pub(crate) fn copy_plugin_files(
     repo_path: &path::Path,
     fish_config_dir: &path::Path,
     plugin: &mut Plugin,
-) -> anyhow::Result<usize> {
+    mut dedupe: Option<&mut HashSet<path::PathBuf>>,
+    skip_on_duplicate: bool,
+) -> anyhow::Result<CopyOutcome> {
+    let mut outcome = CopyOutcome::default();
     let target_dirs = TargetDir::all();
-    let mut file_count = 0;
-    for target_dir in target_dirs {
+    let mut to_copy: Vec<(TargetDir, path::PathBuf)> = Vec::new();
+
+    // Scan phase: gather files and check duplicates early
+    for target_dir in &target_dirs {
         let target_path = repo_path.join(target_dir.as_str());
         if !target_path.exists() {
             continue;
         }
-        let dest_path = fish_config_dir.join(target_dir.as_str());
-        if !dest_path.exists() {
-            fs::create_dir_all(&dest_path)?;
+        let dest_dir = fish_config_dir.join(target_dir.as_str());
+        if !dest_dir.exists() {
+            fs::create_dir_all(&dest_dir)?;
         }
-        file_count +=
-            copy_plugin_files_recursive(&target_path, &dest_path, target_dir.clone(), plugin)?;
+
+        let expected_ext = match target_dir {
+            TargetDir::Themes => Some("theme"),
+            _ => Some("fish"),
+        };
+        for entry in WalkDir::new(&target_path)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            let entry_path = entry.path();
+            if entry.file_type().is_dir() {
+                continue;
+            }
+            if let Some(ext) = expected_ext
+                && entry_path.extension().and_then(|s| s.to_str()) != Some(ext)
+            {
+                continue;
+            }
+            let rel = entry_path.strip_prefix(&target_path).with_context(|| {
+                format!(
+                    "Failed to strip prefix {} from {}",
+                    target_path.display(),
+                    entry_path.display()
+                )
+            })?;
+            let dest_path = dest_dir.join(rel);
+            if let Some(set) = dedupe.as_deref_mut()
+                && set.contains(&dest_path)
+                && skip_on_duplicate
+            {
+                warn!(
+                    "{} Duplicate detected. Skipping plugin due to collision: {}",
+                    Emoji("🚨 ", ""),
+                    dest_path.display()
+                );
+                outcome.skipped_due_to_duplicate = true;
+                return Ok(outcome);
+            }
+            to_copy.push((target_dir.clone(), rel.to_path_buf()));
+        }
     }
-    Ok(file_count)
+
+    // Copy phase
+    for (dir, rel) in to_copy.iter() {
+        let src = repo_path.join(dir.as_str()).join(rel);
+        let dest = fish_config_dir.join(dir.as_str()).join(rel);
+        if let Some(parent) = dest.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent)?;
+        }
+        info!("   - {}", dest.display());
+        fs::copy(&src, &dest)?;
+        plugin.files.push(PluginFile {
+            dir: dir.clone(),
+            name: rel.to_string_lossy().to_string(),
+        });
+        outcome.file_count += 1;
+        if let Some(set) = dedupe.as_deref_mut() {
+            set.insert(dest);
+        }
+    }
+
+    Ok(outcome)
 }
 
+#[allow(dead_code)]
 fn copy_plugin_files_recursive(
     target_path: &path::Path,
     dest_path: &path::Path,

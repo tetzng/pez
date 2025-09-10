@@ -3,14 +3,14 @@ use crate::resolver::{ref_kind_to_repo_source, ref_kind_to_url_source};
 use crate::{
     cli::{InstallArgs, InstallTarget, PluginRepo, ResolvedInstallTarget},
     config, git,
-    lock_file::{LockFile, Plugin, PluginFile},
+    lock_file::{LockFile, Plugin},
     models::TargetDir,
     utils,
 };
 
 use console::Emoji;
 use futures::future;
-use std::{collections::HashSet, fs, path, process, result, sync::Arc};
+use std::{fs, path, process, result, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
@@ -335,16 +335,13 @@ async fn sync_plugin_files(
     new_plugins: &mut [Plugin],
     pez_data_dir: &path::Path,
 ) -> anyhow::Result<Vec<Plugin>> {
+    use std::collections::HashSet;
     info!(
         "\n{}Copying plugin files to fish config directory...",
         Emoji("🐟 ", "")
     );
     let config_dir = utils::load_fish_config_dir()?;
-    let target_dirs = TargetDir::all();
-
-    let mut copy_tasks = Vec::new();
-
-    let mut dest_paths = HashSet::new();
+    let mut dest_paths: HashSet<path::PathBuf> = HashSet::new();
 
     for plugin in new_plugins.iter_mut() {
         let repo_path = if git::is_local_source(&plugin.source) {
@@ -352,88 +349,21 @@ async fn sync_plugin_files(
         } else {
             pez_data_dir.join(plugin.repo.as_str())
         };
-        let mut target_files = Vec::new();
-        let mut skip_plugin = false;
 
         info!("{}Copying files:", Emoji("📂 ", ""));
-        for target_dir in &target_dirs {
-            let target_dir_str = target_dir.as_str();
-            let target_path = repo_path.join(target_dir_str);
-            if !target_path.exists() {
-                continue;
-            }
-
-            // Recursively walk and filter by extension
-            let expected_ext = match target_dir {
-                TargetDir::Themes => Some("theme"),
-                _ => Some("fish"),
-            };
-
-            for entry in walkdir::WalkDir::new(&target_path)
-                .into_iter()
-                .filter_map(Result::ok)
-            {
-                if entry.file_type().is_dir() {
-                    continue;
-                }
-                if let Some(ext) = expected_ext
-                    && entry.path().extension().and_then(|s| s.to_str()) != Some(ext)
-                {
-                    continue;
-                }
-
-                let rel = match entry.path().strip_prefix(&target_path) {
-                    Ok(p) => p,
-                    Err(_) => continue,
-                };
-                let dest_path = config_dir.join(target_dir_str).join(rel);
-
-                if dest_paths.contains(&dest_path) {
-                    warn!(
-                        "{} Skipping plugin due to duplicate: {}",
-                        Emoji("🚨 ", ""),
-                        plugin.repo
-                    );
-                    skip_plugin = true;
-                    break;
-                }
-
-                info!("   - {}", dest_path.display());
-
-                target_files.push(PluginFile {
-                    dir: target_dir.clone(),
-                    name: rel.to_string_lossy().to_string(),
-                });
-
-                dest_paths.insert(dest_path.clone());
-            }
-            if skip_plugin {
-                break;
-            }
-        }
-
-        if !skip_plugin {
-            target_files.iter().for_each(|f| {
-                let target_dir_str = f.dir.as_str();
-                let file_path = repo_path.join(target_dir_str).join(&f.name);
-                let dest_path = config_dir.join(target_dir_str).join(&f.name);
-                copy_tasks.push(tokio::spawn(async move {
-                    tokio::task::spawn_blocking(move || {
-                        if let Some(parent) = dest_path.parent() {
-                            let _ = fs::create_dir_all(parent);
-                        }
-                        let _ = fs::copy(&file_path, &dest_path);
-                    })
-                    .await
-                    .ok();
-                }));
-            });
-
-            plugin.files = target_files.clone();
+        let outcome =
+            utils::copy_plugin_files(&repo_path, &config_dir, plugin, Some(&mut dest_paths), true)?;
+        if outcome.skipped_due_to_duplicate {
+            warn!(
+                "{} Skipping plugin due to duplicate: {}",
+                Emoji("🚨 ", ""),
+                plugin.repo
+            );
+            // Clear any partially accumulated file records for safety
+            plugin.files.clear();
         }
     }
 
-    futures::future::join_all(copy_tasks).await;
     Ok(new_plugins.to_vec())
 }
 
