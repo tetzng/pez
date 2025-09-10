@@ -133,7 +133,7 @@ impl PluginSpec {
                 Ok(crate::cli::ResolvedInstallTarget {
                     plugin_repo,
                     source: src,
-                    ref_kind: ref_to_kind(refspec),
+                    ref_kind: crate::resolver::RefKind::from(refspec),
                     is_local: false,
                 })
             }
@@ -152,7 +152,7 @@ impl PluginSpec {
                 Ok(crate::cli::ResolvedInstallTarget {
                     plugin_repo,
                     source: normalized,
-                    ref_kind: ref_to_kind(refspec),
+                    ref_kind: crate::resolver::RefKind::from(refspec),
                     is_local: false,
                 })
             }
@@ -166,7 +166,7 @@ impl PluginSpec {
                 Ok(crate::cli::ResolvedInstallTarget {
                     plugin_repo,
                     source: expanded,
-                    ref_kind: crate::cli::RefKind::None,
+                    ref_kind: crate::resolver::RefKind::None,
                     is_local: true,
                 })
             }
@@ -217,14 +217,32 @@ fn pick_single_ref(
     Ok(vals.into_iter().next().map(|(_, v)| v))
 }
 
-fn ref_to_kind(val: Option<String>) -> crate::cli::RefKind {
+impl From<Option<String>> for crate::resolver::RefKind {
+    fn from(val: Option<String>) -> Self {
+        match val {
+            None => crate::resolver::RefKind::None,
+            Some(x) => {
+                if x.eq_ignore_ascii_case("latest") {
+                    crate::resolver::RefKind::Latest
+                } else {
+                    crate::resolver::RefKind::Version(x)
+                }
+            }
+        }
+    }
+}
+
+use crate::resolver::RefKind;
+
+#[allow(dead_code)]
+fn ref_to_kind(val: Option<String>) -> RefKind {
     match val {
-        None => crate::cli::RefKind::None,
+        None => RefKind::None,
         Some(x) => {
             if x.eq_ignore_ascii_case("latest") {
-                return crate::cli::RefKind::Latest;
+                return RefKind::Latest;
             }
-            crate::cli::RefKind::Version(x)
+            RefKind::Version(x)
         }
     }
 }
