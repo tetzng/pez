@@ -219,19 +219,9 @@ pub(crate) struct ResolvedInstallTarget {
     /// Repository base source (URL or local path, without @ref).
     pub source: String,
     /// Optional ref selection.
-    pub ref_kind: RefKind,
+    pub ref_kind: crate::resolver::RefKind,
     /// Whether the source is a local filesystem path.
     pub is_local: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum RefKind {
-    None,
-    Latest,
-    Version(String),
-    Tag(String),
-    Branch(String),
-    Commit(String),
 }
 
 impl InstallTarget {
@@ -291,7 +281,7 @@ impl InstallTarget {
             return Ok(ResolvedInstallTarget {
                 plugin_repo,
                 source: path_str,
-                ref_kind: RefKind::None,
+                ref_kind: crate::resolver::RefKind::None,
                 is_local: true,
             });
         }
@@ -313,15 +303,15 @@ impl InstallTarget {
             return Ok(ResolvedInstallTarget {
                 plugin_repo,
                 source: url,
-                ref_kind: RefKind::None,
+                ref_kind: crate::resolver::RefKind::None,
                 is_local: false,
             });
         }
 
         // host/owner/repo[@ref] or owner/repo[@ref]
         let (base, ref_kind) = match raw.split_once('@') {
-            Some((lhs, rhs)) => (lhs.to_string(), parse_ref_kind(rhs)),
-            None => (raw.to_string(), RefKind::None),
+            Some((lhs, rhs)) => (lhs.to_string(), crate::resolver::parse_ref_kind(rhs)),
+            None => (raw.to_string(), crate::resolver::RefKind::None),
         };
 
         let parts: Vec<&str> = base.split('/').collect();
@@ -359,24 +349,6 @@ impl InstallTarget {
     }
 }
 
-fn parse_ref_kind(s: &str) -> RefKind {
-    if s.eq_ignore_ascii_case("latest") {
-        return RefKind::Latest;
-    }
-    if let Some(rest) = s.strip_prefix("tag:") {
-        return RefKind::Tag(rest.to_string());
-    }
-    if let Some(rest) = s.strip_prefix("branch:") {
-        return RefKind::Branch(rest.to_string());
-    }
-    if let Some(rest) = s.strip_prefix("commit:") {
-        return RefKind::Commit(rest.to_string());
-    }
-    if let Some(rest) = s.strip_prefix("version:") {
-        return RefKind::Version(rest.to_string());
-    }
-    RefKind::Version(s.to_string())
-}
 #[derive(Args, Debug)]
 pub(crate) struct MigrateArgs {
     /// Do not write files; print planned changes

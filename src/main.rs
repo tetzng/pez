@@ -6,6 +6,7 @@ mod config;
 mod git;
 mod lock_file;
 mod models;
+mod resolver;
 mod utils;
 
 #[cfg(test)]

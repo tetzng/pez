@@ -1,4 +1,5 @@
-use crate::git::Selection;
+use crate::resolver;
+use crate::resolver::{ref_kind_to_repo_source, ref_kind_to_url_source};
 use crate::{
     cli::{InstallArgs, InstallTarget, PluginRepo, ResolvedInstallTarget},
     config, git,
@@ -103,12 +104,12 @@ fn add_plugins_to_config(
                     } else if r.source == default_source {
                         config::PluginSpec {
                             name: None,
-                            source: ref_kind_to_repo_source(r),
+                            source: ref_kind_to_repo_source(&r.plugin_repo, &r.ref_kind),
                         }
                     } else {
                         config::PluginSpec {
                             name: None,
-                            source: ref_kind_to_url_source(r),
+                            source: ref_kind_to_url_source(&r.source, &r.ref_kind),
                         }
                     };
                     plugin_specs.push(spec);
@@ -128,12 +129,12 @@ fn add_plugins_to_config(
                     } else if r.source == default_source {
                         config::PluginSpec {
                             name: None,
-                            source: ref_kind_to_repo_source(&r),
+                            source: ref_kind_to_repo_source(&r.plugin_repo, &r.ref_kind),
                         }
                     } else {
                         config::PluginSpec {
                             name: None,
-                            source: ref_kind_to_url_source(&r),
+                            source: ref_kind_to_url_source(&r.source, &r.ref_kind),
                         }
                     }
                 })
@@ -250,7 +251,7 @@ async fn clone_plugins(
                             }
                         } else {
                             // force: resolve newest according to ref_kind
-                            let sel = selection_from_ref_kind(&resolved.ref_kind);
+                            let sel = resolver::selection_from_ref_kind(&resolved.ref_kind);
                             let commit_sha = match git::resolve_selection(&repo, &sel) {
                                 std::result::Result::Ok(sha) => sha,
                                 Err(e) => {
@@ -277,7 +278,7 @@ async fn clone_plugins(
                         }
                     } else {
                         // fresh install: resolve selection
-                        let sel = selection_from_ref_kind(&resolved.ref_kind);
+                        let sel = resolver::selection_from_ref_kind(&resolved.ref_kind);
                         let commit_sha = match git::resolve_selection(&repo, &sel) {
                             std::result::Result::Ok(sha) => sha,
                             Err(e) => {
@@ -436,111 +437,6 @@ async fn sync_plugin_files(
     Ok(new_plugins.to_vec())
 }
 
-fn selection_from_ref_kind(kind: &crate::cli::RefKind) -> Selection {
-    match kind {
-        crate::cli::RefKind::None => Selection::DefaultHead,
-        crate::cli::RefKind::Latest => Selection::Latest,
-        crate::cli::RefKind::Version(v) => Selection::Version(v.clone()),
-        crate::cli::RefKind::Tag(t) => Selection::Tag(t.clone()),
-        crate::cli::RefKind::Branch(b) => Selection::Branch(b.clone()),
-        crate::cli::RefKind::Commit(c) => Selection::Commit(c.clone()),
-    }
-}
-
-fn ref_kind_to_repo_source(r: &ResolvedInstallTarget) -> config::PluginSource {
-    match &r.ref_kind {
-        crate::cli::RefKind::None => config::PluginSource::Repo {
-            repo: r.plugin_repo.clone(),
-            version: None,
-            branch: None,
-            tag: None,
-            commit: None,
-        },
-        crate::cli::RefKind::Latest => config::PluginSource::Repo {
-            repo: r.plugin_repo.clone(),
-            version: Some("latest".to_string()),
-            branch: None,
-            tag: None,
-            commit: None,
-        },
-        crate::cli::RefKind::Version(v) => config::PluginSource::Repo {
-            repo: r.plugin_repo.clone(),
-            version: Some(v.clone()),
-            branch: None,
-            tag: None,
-            commit: None,
-        },
-        crate::cli::RefKind::Tag(t) => config::PluginSource::Repo {
-            repo: r.plugin_repo.clone(),
-            version: None,
-            branch: None,
-            tag: Some(t.clone()),
-            commit: None,
-        },
-        crate::cli::RefKind::Branch(b) => config::PluginSource::Repo {
-            repo: r.plugin_repo.clone(),
-            version: None,
-            branch: Some(b.clone()),
-            tag: None,
-            commit: None,
-        },
-        crate::cli::RefKind::Commit(c) => config::PluginSource::Repo {
-            repo: r.plugin_repo.clone(),
-            version: None,
-            branch: None,
-            tag: None,
-            commit: Some(c.clone()),
-        },
-    }
-}
-
-fn ref_kind_to_url_source(r: &ResolvedInstallTarget) -> config::PluginSource {
-    match &r.ref_kind {
-        crate::cli::RefKind::None => config::PluginSource::Url {
-            url: r.source.clone(),
-            version: None,
-            branch: None,
-            tag: None,
-            commit: None,
-        },
-        crate::cli::RefKind::Latest => config::PluginSource::Url {
-            url: r.source.clone(),
-            version: Some("latest".to_string()),
-            branch: None,
-            tag: None,
-            commit: None,
-        },
-        crate::cli::RefKind::Version(v) => config::PluginSource::Url {
-            url: r.source.clone(),
-            version: Some(v.clone()),
-            branch: None,
-            tag: None,
-            commit: None,
-        },
-        crate::cli::RefKind::Tag(t) => config::PluginSource::Url {
-            url: r.source.clone(),
-            version: None,
-            branch: None,
-            tag: Some(t.clone()),
-            commit: None,
-        },
-        crate::cli::RefKind::Branch(b) => config::PluginSource::Url {
-            url: r.source.clone(),
-            version: None,
-            branch: Some(b.clone()),
-            tag: None,
-            commit: None,
-        },
-        crate::cli::RefKind::Commit(c) => config::PluginSource::Url {
-            url: r.source.clone(),
-            version: None,
-            branch: None,
-            tag: None,
-            commit: Some(c.clone()),
-        },
-    }
-}
-
 fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
     let (config, _) = utils::load_config()?;
@@ -588,7 +484,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 };
                 let commit_sha = if *force {
                     if let Some(repo) = &repo {
-                        let sel = selection_from_ref_kind(&ref_kind);
+                        let sel = resolver::selection_from_ref_kind(&ref_kind);
                         match git::resolve_selection(repo, &sel) {
                             std::result::Result::Ok(sha) => sha,
                             Err(e) => {
@@ -658,7 +554,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     "local".to_string()
                 } else {
                     let repo = git::clone_repository(&source_base, &repo_path)?;
-                    let sel = selection_from_ref_kind(&ref_kind);
+                    let sel = resolver::selection_from_ref_kind(&ref_kind);
                     match git::resolve_selection(&repo, &sel) {
                         std::result::Result::Ok(sha) => sha,
                         Err(e) => {
