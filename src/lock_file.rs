@@ -1,7 +1,7 @@
 use crate::{cli::PluginRepo, models::TargetDir};
-use anyhow::Ok;
+
 use serde_derive::{Deserialize, Serialize};
-use std::{fs, path, process};
+use std::{fs, path};
 use tracing::error;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -32,7 +32,7 @@ impl LockFile {
         Ok(())
     }
 
-    pub(crate) fn add_plugin(&mut self, plugin: Plugin) {
+    pub(crate) fn add_plugin(&mut self, plugin: Plugin) -> anyhow::Result<()> {
         if self
             .plugins
             .iter()
@@ -42,9 +42,14 @@ impl LockFile {
                 "Plugin already exists: name={}, source={}",
                 plugin.name, plugin.source
             );
-            process::exit(1);
+            anyhow::bail!(
+                "Plugin already exists: name={}, source={}",
+                plugin.name,
+                plugin.source
+            );
         }
         self.plugins.push(plugin);
+        Ok(())
     }
 
     pub(crate) fn remove_plugin(&mut self, source: &str) {
@@ -55,9 +60,10 @@ impl LockFile {
         self.plugins.iter().find(|p| &p.repo == repo)
     }
 
-    pub(crate) fn update_plugin(&mut self, plugin: Plugin) {
+    pub(crate) fn update_plugin(&mut self, plugin: Plugin) -> anyhow::Result<()> {
         self.remove_plugin(&plugin.source);
-        self.add_plugin(plugin);
+        self.add_plugin(plugin)?;
+        Ok(())
     }
 
     pub(crate) fn merge_plugins(&mut self, new_plugins: Vec<Plugin>) {

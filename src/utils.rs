@@ -3,6 +3,7 @@ use crate::{
     lock_file::{self, LockFile, Plugin, PluginFile},
     models::TargetDir,
 };
+use anyhow::Context;
 use console::Emoji;
 use std::{env, fmt, fs, path};
 use tracing::{debug, error, info, warn};
@@ -184,7 +185,13 @@ fn copy_plugin_files_recursive(
             continue;
         }
 
-        let rel = entry_path.strip_prefix(target_path).unwrap();
+        let rel = entry_path.strip_prefix(target_path).with_context(|| {
+            format!(
+                "Failed to strip prefix {} from {}",
+                target_path.display(),
+                entry_path.display()
+            )
+        })?;
         let dest_file_path = dest_path.join(rel);
         if let Some(parent) = dest_file_path.parent()
             && !parent.exists()
@@ -230,7 +237,7 @@ pub(crate) fn emit_event(file_name_or_path: &str, event: &Event) -> anyhow::Resu
                 .arg("-c")
                 .arg(format!("emit {stem}_{event}"))
                 .spawn()
-                .expect("Failed to execute process")
+                .context("Failed to spawn fish to emit event")?
                 .wait_with_output()?;
             debug!("Emitted event: {}_{}", stem, event);
 

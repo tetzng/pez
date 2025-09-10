@@ -6,7 +6,7 @@ use crate::{
     models::TargetDir,
     utils,
 };
-use anyhow::Ok;
+
 use console::Emoji;
 use futures::future;
 use std::{collections::HashSet, fs, path, process, result, sync::Arc};
@@ -168,8 +168,15 @@ async fn clone_plugins(
                 let plugin_repo_str = plugin_repo.as_str();
                 let repo_path = pez_data_dir.join(&plugin_repo_str);
 
-                if repo_path.exists() {
-                    handle_existing_repository(&force, &plugin_repo, &repo_path).unwrap();
+                if repo_path.exists()
+                    && let Err(e) = handle_existing_repository(&force, &plugin_repo, &repo_path)
+                {
+                    warn!(
+                        "Failed to prepare existing repository {}: {:?}",
+                        repo_path.display(),
+                        e
+                    );
+                    return; // skip this plugin task on error
                 }
 
                 let base_source = resolved.source.clone();
@@ -195,7 +202,18 @@ async fn clone_plugins(
                     return;
                 }
 
-                let repo = git::clone_repository(&base_source, &repo_path).unwrap();
+                let repo = match git::clone_repository(&base_source, &repo_path) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        warn!(
+                            "Failed to clone {} to {}: {:?}",
+                            base_source,
+                            repo_path.display(),
+                            e
+                        );
+                        return;
+                    }
+                };
                 let name = &plugin_repo.repo;
                 let new_plugin = {
                     let locked_opt = lock_file
@@ -210,10 +228,19 @@ async fn clone_plugins(
                                 Emoji("🔄 ", ""),
                                 &lock_file_plugin.commit_sha
                             );
-                            repo.set_head_detached(
-                                git2::Oid::from_str(&lock_file_plugin.commit_sha).unwrap(),
-                            )
-                            .unwrap();
+                            if let Ok(oid) = git2::Oid::from_str(&lock_file_plugin.commit_sha) {
+                                if let Err(e) = repo.set_head_detached(oid) {
+                                    warn!(
+                                        "Failed to detach HEAD to {}: {:?}",
+                                        lock_file_plugin.commit_sha, e
+                                    );
+                                }
+                            } else {
+                                warn!(
+                                    "Invalid commit SHA in lock file: {}",
+                                    lock_file_plugin.commit_sha
+                                );
+                            }
                             Plugin {
                                 name: name.to_string(),
                                 repo: plugin_repo.clone(),
@@ -231,7 +258,13 @@ async fn clone_plugins(
                                         "Failed to resolve selection: {:?}. Falling back to HEAD.",
                                         e
                                     );
-                                    git::get_latest_commit_sha(repo).unwrap()
+                                    match git::get_latest_commit_sha(repo) {
+                                        Ok(s) => s,
+                                        Err(e) => {
+                                            warn!("Failed to read HEAD commit: {:?}", e);
+                                            return;
+                                        }
+                                    }
                                 }
                             };
                             Plugin {
@@ -348,7 +381,10 @@ async fn sync_plugin_files(
                     continue;
                 }
 
-                let rel = entry.path().strip_prefix(&target_path).unwrap();
+                let rel = match entry.path().strip_prefix(&target_path) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
                 let dest_path = config_dir.join(target_dir_str).join(rel);
 
                 if dest_paths.contains(&dest_path) {
@@ -385,10 +421,10 @@ async fn sync_plugin_files(
                         if let Some(parent) = dest_path.parent() {
                             let _ = fs::create_dir_all(parent);
                         }
-                        fs::copy(&file_path, &dest_path).unwrap();
+                        let _ = fs::copy(&file_path, &dest_path);
                     })
                     .await
-                    .unwrap();
+                    .ok();
                 }));
             });
 
@@ -573,7 +609,9 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                             Emoji("🔄 ", ""),
                             &locked_plugin.commit_sha
                         );
-                        repo.set_head_detached(git2::Oid::from_str(&locked_plugin.commit_sha)?)?;
+                        if let Ok(oid) = git2::Oid::from_str(&locked_plugin.commit_sha) {
+                            let _ = repo.set_head_detached(oid);
+                        }
                     }
                     locked_plugin.commit_sha.clone()
                 };
@@ -591,7 +629,9 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 }
                 emit_event(&plugin, &utils::Event::Install)?;
 
-                lock_file.update_plugin(plugin);
+                if let Err(e) = lock_file.update_plugin(plugin) {
+                    warn!("Failed to update lock file entry: {:?}", e);
+                }
                 lock_file.save(&lock_file_path)?;
             }
             None => {
@@ -644,7 +684,9 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 }
                 emit_event(&plugin, &utils::Event::Install)?;
 
-                lock_file.add_plugin(plugin);
+                if let Err(e) = lock_file.add_plugin(plugin) {
+                    warn!("Failed to add lock file entry: {:?}", e);
+                }
                 lock_file.save(&lock_file_path)?;
             }
         }
