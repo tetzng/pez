@@ -76,6 +76,20 @@ impl LockFile {
             }
         }
     }
+
+    /// Returns true if a plugin with the given repo exists.
+    pub(crate) fn contains_repo(&self, repo: &PluginRepo) -> bool {
+        self.plugins.iter().any(|p| &p.repo == repo)
+    }
+
+    /// Upsert a plugin by repo (or source) semantics. If repo exists, update; otherwise add.
+    pub(crate) fn upsert_plugin_by_repo(&mut self, plugin: Plugin) -> anyhow::Result<()> {
+        if self.contains_repo(&plugin.repo) {
+            self.update_plugin(plugin)
+        } else {
+            self.add_plugin(plugin)
+        }
+    }
 }
 
 pub(crate) const AUTO_GENERATED_COMMENT: &str =

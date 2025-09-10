@@ -170,7 +170,7 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                         }
                     });
 
-                if let Err(e) = lock_file.update_plugin(updated_plugin) {
+                if let Err(e) = lock_file.upsert_plugin_by_repo(updated_plugin) {
                     warn!("Failed to update lock file: {:?}", e);
                 }
                 lock_file.save(&lock_file_path)?;

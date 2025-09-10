@@ -456,7 +456,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 }
                 emit_event(&plugin, &utils::Event::Install)?;
 
-                if let Err(e) = lock_file.update_plugin(plugin) {
+                if let Err(e) = lock_file.upsert_plugin_by_repo(plugin) {
                     warn!("Failed to update lock file entry: {:?}", e);
                 }
                 lock_file.save(&lock_file_path)?;
@@ -511,7 +511,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 }
                 emit_event(&plugin, &utils::Event::Install)?;
 
-                if let Err(e) = lock_file.add_plugin(plugin) {
+                if let Err(e) = lock_file.upsert_plugin_by_repo(plugin) {
                     warn!("Failed to add lock file entry: {:?}", e);
                 }
                 lock_file.save(&lock_file_path)?;
