@@ -349,6 +349,47 @@ impl InstallTarget {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_owner_repo_and_variants() {
+        // owner/repo (github)
+        let t: InstallTarget = "o/r".parse().unwrap();
+        let r = t.resolve().unwrap();
+        assert_eq!(r.plugin_repo.as_str(), "o/r");
+        assert_eq!(r.source, "https://github.com/o/r");
+        assert!(!r.is_local);
+
+        // owner/repo@v3 -> Version
+        let t: InstallTarget = "o/r@v3".parse().unwrap();
+        let r = t.resolve().unwrap();
+        matches!(r.ref_kind, crate::resolver::RefKind::Version(_));
+
+        // explicit tag/branch/commit
+        let t: InstallTarget = "o/r@tag:v1.0.0".parse().unwrap();
+        let r = t.resolve().unwrap();
+        matches!(r.ref_kind, crate::resolver::RefKind::Tag(_));
+
+        let t: InstallTarget = "gitlab.com/o/r@branch:dev".parse().unwrap();
+        let r = t.resolve().unwrap();
+        assert_eq!(r.source, "https://gitlab.com/o/r");
+        matches!(r.ref_kind, crate::resolver::RefKind::Branch(_));
+
+        let t: InstallTarget = "https://example.com/o/r".parse().unwrap();
+        let r = t.resolve().unwrap();
+        assert_eq!(r.source, "https://example.com/o/r");
+        matches!(r.ref_kind, crate::resolver::RefKind::None);
+
+        // local path
+        let home = std::env::var("HOME").unwrap();
+        let t = InstallTarget::from_raw(home.to_string());
+        let r = t.resolve().unwrap();
+        assert!(r.is_local);
+    }
+}
+
 #[derive(Args, Debug)]
 pub(crate) struct MigrateArgs {
     /// Do not write files; print planned changes

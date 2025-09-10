@@ -174,6 +174,82 @@ impl PluginSpec {
     }
 }
 
+#[cfg(test)]
+mod internal_tests {
+    use super::*;
+
+    #[test]
+    fn repo_to_resolved_latest() {
+        let s = PluginSource::Repo {
+            repo: crate::cli::PluginRepo {
+                owner: "o".into(),
+                repo: "r".into(),
+            },
+            version: Some("latest".into()),
+            branch: None,
+            tag: None,
+            commit: None,
+        };
+        let spec = PluginSpec {
+            name: None,
+            source: s,
+        };
+        let r = spec.to_resolved().unwrap();
+        assert_eq!(r.source, "https://github.com/o/r");
+        matches!(r.ref_kind, crate::resolver::RefKind::Latest);
+    }
+
+    #[test]
+    fn url_without_scheme_normalizes() {
+        let s = PluginSource::Url {
+            url: "gitlab.com/o/r".into(),
+            version: Some("v3".into()),
+            branch: None,
+            tag: None,
+            commit: None,
+        };
+        let spec = PluginSpec {
+            name: None,
+            source: s,
+        };
+        let r = spec.to_resolved().unwrap();
+        assert_eq!(r.source, "https://gitlab.com/o/r");
+        matches!(r.ref_kind, crate::resolver::RefKind::Version(_));
+    }
+
+    #[test]
+    fn path_requires_absolute_or_tilde() {
+        let s = PluginSource::Path {
+            path: "relative/path".into(),
+        };
+        let spec = PluginSpec {
+            name: None,
+            source: s,
+        };
+        let err = spec.to_resolved().unwrap_err();
+        assert!(err.to_string().contains("absolute"));
+    }
+
+    #[test]
+    fn one_of_rule_enforced() {
+        let s = PluginSource::Repo {
+            repo: crate::cli::PluginRepo {
+                owner: "o".into(),
+                repo: "r".into(),
+            },
+            version: Some("v1".into()),
+            branch: None,
+            tag: Some("v1.0.0".into()),
+            commit: None,
+        };
+        let spec = PluginSpec {
+            name: None,
+            source: s,
+        };
+        let err = spec.to_resolved().unwrap_err();
+        assert!(err.to_string().contains("Multiple version selectors"));
+    }
+}
 fn expand_tilde(p: &str) -> anyhow::Result<String> {
     if let Some(stripped) = p.strip_prefix("~/") {
         let home = std::env::var_os("HOME").ok_or_else(|| anyhow::anyhow!("HOME not set"))?;
@@ -244,5 +320,82 @@ fn ref_to_kind(val: Option<String>) -> RefKind {
             }
             RefKind::Version(x)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repo_to_resolved_latest() {
+        let s = PluginSource::Repo {
+            repo: crate::cli::PluginRepo {
+                owner: "o".into(),
+                repo: "r".into(),
+            },
+            version: Some("latest".into()),
+            branch: None,
+            tag: None,
+            commit: None,
+        };
+        let spec = PluginSpec {
+            name: None,
+            source: s,
+        };
+        let r = spec.to_resolved().unwrap();
+        assert_eq!(r.source, "https://github.com/o/r");
+        matches!(r.ref_kind, crate::resolver::RefKind::Latest);
+    }
+
+    #[test]
+    fn url_without_scheme_normalizes() {
+        let s = PluginSource::Url {
+            url: "gitlab.com/o/r".into(),
+            version: Some("v3".into()),
+            branch: None,
+            tag: None,
+            commit: None,
+        };
+        let spec = PluginSpec {
+            name: None,
+            source: s,
+        };
+        let r = spec.to_resolved().unwrap();
+        assert_eq!(r.source, "https://gitlab.com/o/r");
+        matches!(r.ref_kind, crate::resolver::RefKind::Version(_));
+    }
+
+    #[test]
+    fn path_requires_absolute_or_tilde() {
+        let s = PluginSource::Path {
+            path: "relative/path".into(),
+        };
+        let spec = PluginSpec {
+            name: None,
+            source: s,
+        };
+        let err = spec.to_resolved().unwrap_err();
+        assert!(err.to_string().contains("absolute"));
+    }
+
+    #[test]
+    fn one_of_rule_enforced() {
+        let s = PluginSource::Repo {
+            repo: crate::cli::PluginRepo {
+                owner: "o".into(),
+                repo: "r".into(),
+            },
+            version: Some("v1".into()),
+            branch: None,
+            tag: Some("v1.0.0".into()),
+            commit: None,
+        };
+        let spec = PluginSpec {
+            name: None,
+            source: s,
+        };
+        let err = spec.to_resolved().unwrap_err();
+        assert!(err.to_string().contains("Multiple version selectors"));
     }
 }
