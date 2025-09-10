@@ -10,9 +10,9 @@ use crate::{
 
 use console::Emoji;
 use futures::future;
-use std::{fs, path, process, result, sync::Arc};
+use std::{fs, path, result, sync::Arc};
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 pub(crate) async fn run(args: &InstallArgs) -> anyhow::Result<()> {
     info!("{}Starting installation process...", Emoji("🔍 ", ""));
@@ -466,13 +466,11 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     if *force {
                         fs::remove_dir_all(&repo_path)?;
                     } else {
-                        error!(
-                            "{}{} Plugin already exists: {}, Use --force to reinstall",
-                            Emoji("❌ ", ""),
-                            console::style("Error:").red().bold(),
-                            repo_for_id
+                        anyhow::bail!(
+                            "Plugin already exists: {} (path: {}). Use --force to reinstall",
+                            repo_for_id,
+                            repo_path.display()
                         );
-                        process::exit(1);
                     }
                 }
 
