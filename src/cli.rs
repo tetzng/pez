@@ -49,7 +49,7 @@ pub(crate) enum Commands {
 
 #[derive(Args, Debug)]
 pub(crate) struct InstallArgs {
-    /// Plugin sources: <owner>/<repo>[@ref], <host>/<owner>/<repo>[@ref], full URL, or local path
+    /// Plugin sources: `owner/repo[@ref]`, `host/owner/repo[@ref]`, full URL, or local path
     pub(crate) plugins: Option<Vec<InstallTarget>>,
 
     /// Force install even if the plugin is already installed
@@ -63,7 +63,7 @@ pub(crate) struct InstallArgs {
 
 #[derive(Args, Debug)]
 pub(crate) struct UninstallArgs {
-    /// GitHub repo in the format <owner>/<repo>
+    /// GitHub repo in the format `owner/repo`
     #[arg(required = true)]
     pub(crate) plugins: Vec<PluginRepo>,
 
@@ -74,7 +74,7 @@ pub(crate) struct UninstallArgs {
 
 #[derive(Args, Debug)]
 pub(crate) struct UpgradeArgs {
-    /// GitHub repo in the format <owner>/<repo>
+    /// GitHub repo in the format `owner/repo`
     pub(crate) plugins: Option<Vec<PluginRepo>>,
 }
 
@@ -182,12 +182,12 @@ impl std::str::FromStr for PluginRepo {
 
 /// A user-supplied install target that can be a repo, URL, or local path.
 /// Supported examples:
-/// - owner/repo
-/// - owner/repo@v3
-/// - gitlab.com/owner/repo
-/// - gitlab.com/owner/repo@branch
-/// - https://example.com/owner/repo
-/// - ~/path/to/repo or ./relative/path
+/// - `owner/repo`
+/// - `owner/repo@v3`
+/// - `gitlab.com/owner/repo`
+/// - `gitlab.com/owner/repo@branch`
+/// - <https://example.com/owner/repo>
+/// - `~/path/to/repo` or `./relative/path`
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(try_from = "String", into = "String")]
 pub(crate) struct InstallTarget {
@@ -235,8 +235,8 @@ impl InstallTarget {
     }
     /// Parse the raw string into a `ResolvedInstallTarget`.
     /// Rules:
-    /// - owner/repo[@ref] => github.com
-    /// - host/owner/repo[@ref] (no scheme) => https://host/owner/repo
+    /// - `owner/repo[@ref]` => github.com
+    /// - `host/owner/repo[@ref]` (no scheme) => <https://host/owner/repo>
     /// - URLs with scheme left as-is (no @ref parsing to avoid ssh user@ conflicts)
     /// - Paths beginning with '/', './', '../', or '~' are treated as local
     pub fn resolve(&self) -> anyhow::Result<ResolvedInstallTarget> {
