@@ -59,7 +59,7 @@ impl TestEnvironmentSetup {
         }
     }
 
-    pub(crate) fn add_plugin_files_to_repo(&self, repo: &PluginRepo, files: &Vec<PluginFile>) {
+    pub(crate) fn add_plugin_files_to_repo(&self, repo: &PluginRepo, files: &[PluginFile]) {
         let repo_path = self.data_dir.join(repo.as_str());
         for file in files {
             let dir = repo_path.join(file.dir.as_str());
@@ -102,7 +102,7 @@ impl config::Config {
             .as_ref()
             .unwrap()
             .iter()
-            .map(|p| p.repo.clone())
+            .filter_map(|p| p.get_plugin_repo().ok())
             .collect()
     }
 }

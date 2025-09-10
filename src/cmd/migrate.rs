@@ -64,9 +64,14 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
                 planned = repos
                     .iter()
                     .map(|r| config::PluginSpec {
-                        repo: r.clone(),
                         name: None,
-                        source: None,
+                        source: config::PluginSource::Repo {
+                            repo: r.clone(),
+                            version: None,
+                            branch: None,
+                            tag: None,
+                            commit: None,
+                        },
                     })
                     .collect();
                 if !args.dry_run {
@@ -74,17 +79,30 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
                 }
             } else {
                 for r in repos {
-                    if !list.iter().any(|p| p.repo == r) {
+                    if !list
+                        .iter()
+                        .any(|p| p.get_plugin_repo().is_ok_and(|pr| pr == r))
+                    {
                         planned.push(config::PluginSpec {
-                            repo: r.clone(),
                             name: None,
-                            source: None,
+                            source: config::PluginSource::Repo {
+                                repo: r.clone(),
+                                version: None,
+                                branch: None,
+                                tag: None,
+                                commit: None,
+                            },
                         });
                         if !args.dry_run {
                             list.push(config::PluginSpec {
-                                repo: r,
                                 name: None,
-                                source: None,
+                                source: config::PluginSource::Repo {
+                                    repo: r,
+                                    version: None,
+                                    branch: None,
+                                    tag: None,
+                                    commit: None,
+                                },
                             });
                         }
                     }
@@ -95,9 +113,14 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
             planned = repos
                 .iter()
                 .map(|r| config::PluginSpec {
-                    repo: r.clone(),
                     name: None,
-                    source: None,
+                    source: config::PluginSource::Repo {
+                        repo: r.clone(),
+                        version: None,
+                        branch: None,
+                        tag: None,
+                        commit: None,
+                    },
                 })
                 .collect();
             if !args.dry_run {
@@ -113,16 +136,23 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
         info!("{}Updated {}", Emoji("✅ ", ""), cfg_path.display());
     }
     for p in &planned {
-        println!("  - {}", p.repo.as_str());
+        println!(
+            "  - {}",
+            p.get_plugin_repo().map(|r| r.as_str()).unwrap_or_default()
+        );
     }
     if planned.is_empty() {
         info!("{}Nothing to update.", Emoji("ℹ ", ""));
     }
 
     if !args.dry_run && args.install && !planned.is_empty() {
-        let repos: Vec<_> = planned.iter().map(|p| p.repo.clone()).collect();
+        let targets: Vec<_> = planned
+            .iter()
+            .filter_map(|p| p.get_plugin_repo().ok())
+            .map(|r| crate::cli::InstallTarget::from_raw(r.as_str()))
+            .collect();
         let install_args = InstallArgs {
-            plugins: Some(repos),
+            plugins: Some(targets),
             force: false,
             prune: false,
         };

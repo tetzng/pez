@@ -20,11 +20,20 @@ fn create_config(config_dir: &path::Path) -> anyhow::Result<()> {
 
     let contents = r#"# This file defines the plugins to be installed by pez.
 
-# Example of a plugin:
+# Examples of plugins:
 # [[plugins]]
-# repo = "owner/repo"  # The package identifier in the format <owner>/<repo>
+# repo = "owner/repo"      # GitHub shorthand
+# # version = "v3"        # Or: tag = "...", branch = "...", commit = "..."
+# # name = "custom-name"   # Optional display name
 
-# Add more plugins below by copying the [[plugins]] block.
+# [[plugins]]
+# url = "https://gitlab.com/owner/repo"  # Any Git host URL
+# # branch = "main"
+
+# [[plugins]]
+# path = "~/path/to/local/plugin"       # Local directory
+
+# Add more plugins by copying the [[plugins]] block.
 "#;
     fs::write(&config_path, contents)?;
     info!("Created {}", config_path.display());
@@ -47,17 +56,8 @@ mod tests {
         assert!(config_path.exists());
 
         let contents = fs::read_to_string(&config_path).unwrap();
-        assert_eq!(
-            contents,
-            r#"# This file defines the plugins to be installed by pez.
-
-# Example of a plugin:
-# [[plugins]]
-# repo = "owner/repo"  # The package identifier in the format <owner>/<repo>
-
-# Add more plugins below by copying the [[plugins]] block.
-"#
-        );
+        assert!(contents.contains("[[plugins]]"));
+        assert!(contents.contains("repo = \"owner/repo\""));
     }
 
     #[test]

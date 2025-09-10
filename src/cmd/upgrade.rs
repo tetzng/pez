@@ -53,20 +53,33 @@ fn upgrade(plugin: &PluginRepo) -> anyhow::Result<()> {
 
     match config.plugins {
         Some(ref mut plugin_specs) => {
-            if !plugin_specs.iter().any(|p| p.repo == plugin.clone()) {
+            if !plugin_specs
+                .iter()
+                .any(|p| p.get_plugin_repo().is_ok_and(|r| r == *plugin))
+            {
                 plugin_specs.push(PluginSpec {
-                    repo: plugin.clone(),
                     name: None,
-                    source: None,
+                    source: crate::config::PluginSource::Repo {
+                        repo: plugin.clone(),
+                        version: None,
+                        branch: None,
+                        tag: None,
+                        commit: None,
+                    },
                 });
                 config.save(&config_path)?;
             }
         }
         None => {
             config.plugins = Some(vec![PluginSpec {
-                repo: plugin.clone(),
                 name: None,
-                source: None,
+                source: crate::config::PluginSource::Repo {
+                    repo: plugin.clone(),
+                    version: None,
+                    branch: None,
+                    tag: None,
+                    commit: None,
+                },
             }]);
             config.save(&config_path)?;
         }
@@ -83,7 +96,7 @@ async fn upgrade_all() -> anyhow::Result<()> {
         let jobs = utils::load_jobs();
         let tasks = stream::iter(plugins.iter())
             .map(|plugin_spec| {
-                let repo = plugin_spec.repo.clone();
+                let repo = plugin_spec.get_plugin_repo().unwrap();
                 tokio::task::spawn_blocking(move || {
                     info!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &repo);
                     upgrade_plugin(&repo)
@@ -101,12 +114,20 @@ async fn upgrade_all() -> anyhow::Result<()> {
 
 fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
-    let source = &git::format_git_url(&plugin_repo.as_str());
     let config_dir = utils::load_fish_config_dir()?;
 
-    match lock_file.get_plugin(source) {
+    match lock_file.get_plugin_by_repo(plugin_repo) {
         Some(lock_file_plugin) => {
             let repo_path = utils::load_pez_data_dir()?.join(lock_file_plugin.repo.as_str());
+            if git::is_local_source(&lock_file_plugin.source) {
+                info!(
+                    "{}{} Plugin {} is a local source; skipping upgrade.",
+                    Emoji("🚧 ", ""),
+                    console::style("Info:").cyan(),
+                    plugin_repo
+                );
+                return Ok(());
+            }
             if repo_path.exists() {
                 let repo = git2::Repository::open(&repo_path)?;
                 let latest_remote_commit = git::get_latest_remote_commit(&repo)?;
@@ -131,7 +152,7 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                 let mut updated_plugin = Plugin {
                     name: lock_file_plugin.name.to_string(),
                     repo: plugin_repo.clone(),
-                    source: source.to_string(),
+                    source: lock_file_plugin.source.clone(),
                     commit_sha: latest_remote_commit,
                     files: vec![],
                 };
