@@ -261,7 +261,7 @@ fn warn_no_plugin_files() {
 
 #[cfg(test)]
 mod tests {
-    use config::PluginSpec;
+    use config::{PluginSource, PluginSpec};
 
     use super::*;
     use crate::cli::PluginRepo;
@@ -287,12 +287,17 @@ mod tests {
                     files: vec![],
                 },
                 plugin_spec: PluginSpec {
-                    repo: PluginRepo {
-                        owner: "owner".to_string(),
-                        repo: "repo".to_string(),
-                    },
                     name: None,
-                    source: None,
+                    source: PluginSource::Repo {
+                        repo: PluginRepo {
+                            owner: "owner".to_string(),
+                            repo: "repo".to_string(),
+                        },
+                        version: None,
+                        branch: None,
+                        tag: None,
+                        commit: None,
+                    },
                 },
             }
         }
@@ -318,7 +323,7 @@ mod tests {
             dir: TargetDir::Functions,
             name: "file.fish".to_string(),
         }];
-        let repo = test_data.plugin_spec.repo;
+        let repo = test_data.plugin_spec.get_plugin_repo().unwrap();
         fs::create_dir_all(test_env.data_dir.join(repo.as_str())).unwrap();
         test_env.add_plugin_files_to_repo(&repo, &plugin_files);
 
@@ -365,7 +370,7 @@ mod tests {
         let test_env = TestEnvironmentSetup::new();
         let mut test_data = TestDataBuilder::new().build();
 
-        let repo = test_data.plugin_spec.repo;
+        let repo = test_data.plugin_spec.get_plugin_repo().unwrap();
         let target_dir = TargetDir::Functions;
 
         let target_path = test_env
@@ -415,7 +420,7 @@ mod tests {
             name: "nested/dir/sample.fish".to_string(),
         }];
 
-        let repo = test_data.plugin_spec.repo;
+        let repo = test_data.plugin_spec.get_plugin_repo().unwrap();
         fs::create_dir_all(test_env.data_dir.join(repo.as_str())).unwrap();
         test_env.add_plugin_files_to_repo(&repo, &plugin_files);
 

@@ -72,7 +72,7 @@ fn find_unused_plugins(
                 .as_ref()
                 .unwrap()
                 .iter()
-                .any(|p| p.repo == plugin.repo)
+                .any(|p| p.get_plugin_repo().is_ok_and(|r| r == plugin.repo))
         })
         .cloned()
         .collect())
@@ -298,7 +298,7 @@ fn dry_run(force: bool, ctx: &mut PruneContext) -> anyhow::Result<()> {
                     .as_ref()
                     .unwrap()
                     .iter()
-                    .any(|p| p.repo == plugin.repo)
+                    .any(|p| p.get_plugin_repo().is_ok_and(|r| r == plugin.repo))
             })
             .cloned()
             .collect()
@@ -362,7 +362,7 @@ mod tests {
         models::TargetDir,
         tests_support::env::TestEnvironmentSetup,
     };
-    use config::PluginSpec;
+    use config::{PluginSource, PluginSpec};
 
     struct TestDataBuilder {
         used_plugin: Plugin,
@@ -400,12 +400,17 @@ mod tests {
                     }],
                 },
                 used_plugin_spec: PluginSpec {
-                    repo: PluginRepo {
-                        owner: "owner".to_string(),
-                        repo: "used-repo".to_string(),
-                    },
                     name: None,
-                    source: None,
+                    source: PluginSource::Repo {
+                        repo: PluginRepo {
+                            owner: "owner".to_string(),
+                            repo: "used-repo".to_string(),
+                        },
+                        version: None,
+                        branch: None,
+                        tag: None,
+                        commit: None,
+                    },
                 },
             }
         }

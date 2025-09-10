@@ -3,17 +3,42 @@
 > [!WARNING]
 > This project is still in development and may not be stable. Use at your own risk.
 
-A Rust-Based Plugin Manager for [fish](https://fishshell.com/)
+A Rust-based plugin manager for [fish](https://fishshell.com/)
 
 ## Installation
 
 Ensure you have Rust installed on your system. You can install pez using Cargo:
 
 ```sh
+# From crates.io (if available)
 cargo install pez
+
+# From source (in this repo)
+cargo install --path .
 ```
 
-## Completions
+## Quick Start
+
+```fish
+# 1) Initialize configuration (creates pez.toml)
+pez init
+
+# 2) Add a plugin to pez.toml
+#    Minimal example:
+#    [[plugins]]
+#    repo = "owner/repo"
+
+# 3) Install plugins listed in pez.toml
+pez install
+
+# 4) Verify installation
+pez list --format table
+
+# 5) (Optional) Enable completions for pez itself
+pez completions fish > ~/.config/fish/completions/pez.fish
+```
+
+## Shell Completions
 
 ```fish
 pez completions fish > ~/.config/fish/completions/pez.fish
@@ -32,6 +57,8 @@ upgrade      Upgrade installed fish plugin(s)
 list         List installed fish plugins
 prune        Prune uninstalled plugins
 completions  Generate shell completion scripts
+doctor       Diagnose common setup issues
+migrate      Migrate from fisher (reads fish_plugins)
 help         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -55,6 +82,9 @@ pez install
 # Force reinstalling plugins even if they are already installed
 pez install --force
 
+# Remove plugins present in pez-lock.toml but not in pez.toml
+pez install --prune
+
 # Install a specific plugin
 pez install owner/package1
 
@@ -69,7 +99,10 @@ pez install owner/package1 owner/package2
 pez uninstall owner/package1
 
 # Uninstall multiple plugins
-pez uninstall owner/package1 owner/package
+pez uninstall owner/package1 owner/package2
+
+# Remove orphaned files even if repo dir is missing
+pez uninstall --force owner/package1
 ```
 
 ### upgrade
@@ -93,6 +126,10 @@ pez list
 
 # List only outdated plugins
 pez list --outdated
+
+# Output format: plain (default), table, json
+pez list --format table
+pez list --outdated --format json
 ```
 
 ### prune
@@ -103,6 +140,35 @@ pez prune
 
 # Dry run to see what would be pruned
 pez prune --dry-run
+
+# Skip confirmation when pez.toml is empty
+pez prune --yes
+```
+
+### doctor
+
+```fish
+# Run diagnostics (checks config, lockfile, data dir, target files)
+pez doctor
+
+# JSON output
+pez doctor --format json
+```
+
+### migrate (from fisher)
+
+```fish
+# Reads fish_plugins and updates pez.toml
+pez migrate
+
+# Write changes and immediately install migrated plugins
+pez migrate --install
+
+# Preview changes without writing files
+pez migrate --dry-run
+
+# Overwrite existing pez.toml plugin list instead of merging
+pez migrate --force
 ```
 
 ## Configuration
@@ -141,13 +207,13 @@ pez clones plugin repositories into a designated data directory,
 prioritized as follows:
 `$PEZ_DATA_DIR` > `$__fish_user_data_dir/pez` > `$XDG_DATA_HOME/fish/pez` > `~/.local/share/fish/pez`
 
-When you install a plugin, pez clones its repository into pez_data_dir.
+When you install a plugin, pez clones its repository into `pez_data_dir`.
 If the directory doesn’t exist, pez will create it.
 If the repository is already cloned, pez will notify you and skip cloning
 unless you use the --force option to re-clone it.
 
 After cloning, if the repository contains functions, completions, conf.d,
-or themes directories, pez will copy the files from these directories
+or themes directories, pez will recursively copy files from these directories
 to the corresponding fish configuration directories:
 
 - `~/.config/fish/functions`
@@ -165,6 +231,10 @@ using the following environment variables:
 Additionally, `pez-lock.toml` records information about the installed packages
 and the files copied. It is created in the same directory as `pez.toml`
 and will append information if it already exists.
+
+### Concurrency
+
+Control job parallelism for installs/uninstalls with `PEZ_JOBS` (default: 4).
 
 ## Acknowledgements
 

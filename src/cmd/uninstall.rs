@@ -1,6 +1,5 @@
 use crate::{
     cli::{PluginRepo, UninstallArgs},
-    git,
     models::TargetDir,
     utils,
 };
@@ -38,15 +37,15 @@ pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
 
 pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result<()> {
     let plugin_repo_str = plugin_repo.as_str();
-    let source = &git::format_git_url(&plugin_repo_str);
     let config_dir = utils::load_fish_config_dir()?;
 
     let (mut config, config_path) = utils::load_or_create_config()?;
     let repo_path = utils::load_pez_data_dir()?.join(&plugin_repo_str);
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
-    match lock_file.get_plugin(source) {
+    match lock_file.get_plugin_by_repo(plugin_repo) {
         Some(locked_plugin) => {
-            locked_plugin
+            let locked = locked_plugin.clone();
+            locked
                 .files
                 .iter()
                 .filter(|f| f.dir == TargetDir::ConfD)
@@ -69,7 +68,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                         "{}Detected plugin files based on pez-lock.toml:",
                         Emoji("📄 ", ""),
                     );
-                    locked_plugin.files.iter().for_each(|file| {
+                    locked.files.iter().for_each(|file| {
                         let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
                         info!("   - {}", dest_path.display());
                     });
@@ -82,7 +81,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 "{}Removing plugin files based on pez-lock.toml:",
                 Emoji("🗑️  ", ""),
             );
-            locked_plugin.files.iter().for_each(|file| {
+            locked.files.iter().for_each(|file| {
                 let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
                 if dest_path.exists() {
                     let path_display = dest_path.display();
@@ -90,11 +89,11 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                     fs::remove_file(&dest_path).unwrap();
                 }
             });
-            lock_file.remove_plugin(source);
+            lock_file.remove_plugin(&locked.source);
             lock_file.save(&lock_file_path)?;
 
             if let Some(ref mut plugin_specs) = config.plugins {
-                plugin_specs.retain(|p| p.repo != plugin_repo.clone());
+                plugin_specs.retain(|p| p.get_plugin_repo().map_or(true, |r| r != *plugin_repo));
                 config.save(&config_path)?;
             }
         }

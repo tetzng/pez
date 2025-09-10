@@ -1,10 +1,6 @@
 use git2::{Cred, Error, FetchOptions, RemoteCallbacks};
 use std::path;
 
-pub(crate) fn format_git_url(plugin: &str) -> String {
-    format!("https://github.com/{plugin}")
-}
-
 pub(crate) fn clone_repository(
     repo_url: &str,
     target_path: &path::Path,
@@ -28,7 +24,8 @@ fn setup_remote_callbacks() -> RemoteCallbacks<'static> {
 fn setup_fetch_options(callbacks: RemoteCallbacks<'static>) -> FetchOptions<'static> {
     let mut fetch_options = FetchOptions::new();
     fetch_options.remote_callbacks(callbacks);
-    fetch_options.download_tags(git2::AutotagOption::None);
+    // Download all tags to support @tag checkouts.
+    fetch_options.download_tags(git2::AutotagOption::All);
     fetch_options
 }
 
@@ -36,6 +33,207 @@ pub(crate) fn get_latest_commit_sha(repo: git2::Repository) -> Result<String, gi
     let commit = repo.head()?.peel_to_commit()?;
 
     Ok(commit.id().to_string())
+}
+
+/// Attempts to checkout the provided git `refspec` (tag/branch/commit) and returns the checked out commit sha.
+#[allow(dead_code)]
+pub(crate) fn checkout_ref(repo: &git2::Repository, refspec: &str) -> anyhow::Result<String> {
+    // Try to resolve as any object (commit, tag, branch)
+    let obj = repo
+        .revparse_single(refspec)
+        .or_else(|_| repo.revparse_single(&format!("refs/tags/{refspec}")))?;
+    repo.set_head_detached(obj.id())?;
+    Ok(obj.id().to_string())
+}
+
+/// Rough heuristic: a source is a local path if it starts with '/', './', '../', or '~'.
+pub(crate) fn is_local_source(source: &str) -> bool {
+    source.starts_with('/')
+        || source.starts_with("./")
+        || source.starts_with("../")
+        || source.starts_with('~')
+}
+
+pub(crate) fn fetch_all(repo: &git2::Repository) -> anyhow::Result<()> {
+    let mut cb = RemoteCallbacks::new();
+    cb.credentials(|_url, username, _allowed| {
+        if let Some(username) = username {
+            Cred::ssh_key_from_agent(username)
+        } else {
+            Err(git2::Error::from_str("No username provided"))
+        }
+    });
+    let mut fo = FetchOptions::new();
+    fo.remote_callbacks(cb);
+    fo.download_tags(git2::AutotagOption::All);
+    let mut remote = repo.find_remote("origin")?;
+    remote.fetch(
+        &[
+            "refs/heads/*:refs/remotes/origin/*",
+            "refs/tags/*:refs/tags/*",
+        ],
+        Some(&mut fo),
+        None,
+    )?;
+    Ok(())
+}
+
+pub(crate) fn get_remote_head_commit(repo: &git2::Repository) -> anyhow::Result<String> {
+    fetch_all(repo)?;
+    let remote_head_ref = "refs/remotes/origin/HEAD";
+    let r = repo.find_reference(remote_head_ref)?.resolve()?;
+    let oid = r
+        .target()
+        .ok_or_else(|| anyhow::anyhow!("Remote HEAD has no target"))?;
+    Ok(oid.to_string())
+}
+
+pub(crate) fn get_remote_branch_commit(
+    repo: &git2::Repository,
+    branch: &str,
+) -> anyhow::Result<Option<String>> {
+    fetch_all(repo)?;
+    let refname = format!("refs/remotes/origin/{branch}");
+    match repo.find_reference(&refname) {
+        Ok(r) => Ok(r.target().map(|oid| oid.to_string())),
+        Err(_) => Ok(None),
+    }
+}
+
+pub(crate) fn get_tag_commit(repo: &git2::Repository, tag: &str) -> anyhow::Result<Option<String>> {
+    fetch_all(repo)?;
+    let name = format!("refs/tags/{tag}");
+    match repo.revparse_single(&name) {
+        Ok(obj) => Ok(Some(obj.peel_to_commit()?.id().to_string())),
+        Err(_) => Ok(None),
+    }
+}
+
+pub(crate) fn list_tags(repo: &git2::Repository) -> anyhow::Result<Vec<String>> {
+    fetch_all(repo)?;
+    let names = repo.tag_names(None)?;
+    let mut tags = Vec::new();
+    for i in 0..names.len() {
+        if let Some(name) = names.get(i) {
+            tags.push(name.to_string());
+        }
+    }
+    Ok(tags)
+}
+
+pub(crate) enum Selection {
+    DefaultHead,
+    Latest,
+    Branch(String),
+    Tag(String),
+    Commit(String),
+    Version(String),
+}
+
+pub(crate) fn resolve_selection(
+    repo: &git2::Repository,
+    sel: &Selection,
+) -> anyhow::Result<String> {
+    match sel {
+        Selection::DefaultHead | Selection::Latest => get_remote_head_commit(repo),
+        Selection::Branch(name) => {
+            if let Some(c) = get_remote_branch_commit(repo, name)? {
+                Ok(c)
+            } else {
+                anyhow::bail!(format!("Branch not found: {name}"))
+            }
+        }
+        Selection::Tag(t) => {
+            if let Some(c) = get_tag_commit(repo, t)? {
+                Ok(c)
+            } else {
+                anyhow::bail!(format!("Tag not found: {t}"))
+            }
+        }
+        Selection::Commit(sha) => {
+            let obj = repo.revparse_single(sha)?;
+            Ok(obj.peel_to_commit()?.id().to_string())
+        }
+        Selection::Version(v) => resolve_version(repo, v),
+    }
+}
+
+fn resolve_version(repo: &git2::Repository, v: &str) -> anyhow::Result<String> {
+    if v == "latest" {
+        return get_remote_head_commit(repo);
+    }
+    if let Some(c) = get_remote_branch_commit(repo, v)? {
+        return Ok(c);
+    }
+    let tags = list_tags(repo)?;
+    if let Some(tag) = pick_tag_for_version(&tags, v)?
+        && let Some(c) = get_tag_commit(repo, &tag)?
+    {
+        return Ok(c);
+    }
+    anyhow::bail!(format!("No matching branch or tag for version: {v}"))
+}
+
+fn pick_tag_for_version(tags: &[String], v: &str) -> anyhow::Result<Option<String>> {
+    use semver::Version;
+    let v_trim = v.trim_start_matches('v');
+    let parts: Vec<&str> = v_trim.split('.').collect();
+    let mut semver_tags: Vec<(Version, String)> = Vec::new();
+    for t in tags {
+        let name = t.trim();
+        let name_trim = name.trim_start_matches('v');
+        if let Ok(ver) = Version::parse(name_trim) {
+            semver_tags.push((ver, name.to_string()));
+        }
+    }
+    if !semver_tags.is_empty() {
+        if parts.len() == 3
+            && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit()))
+            && let Ok(want) = Version::parse(v_trim)
+            && let Some((_, tag)) = semver_tags.iter().find(|(sv, _)| *sv == want)
+        {
+            return Ok(Some(tag.clone()));
+        }
+        let want_major = parts.first().and_then(|s| s.parse::<u64>().ok());
+        let want_minor = parts.get(1).and_then(|s| s.parse::<u64>().ok());
+        if let Some(mj) = want_major {
+            let mut candidates: Vec<(Version, String)> = semver_tags
+                .into_iter()
+                .filter(|(sv, _)| sv.major == mj && want_minor.is_none_or(|mn| sv.minor == mn))
+                .collect();
+            if !candidates.is_empty() {
+                candidates.sort_by(|a, b| a.0.cmp(&b.0));
+                return Ok(candidates.last().map(|(_, tag)| tag.clone()));
+            }
+        }
+    }
+    if tags.iter().any(|t| t == v) {
+        return Ok(Some(v.to_string()));
+    }
+    let mut candidates: Vec<(Vec<u64>, String)> = Vec::new();
+    for t in tags {
+        if t == v {
+            return Ok(Some(t.clone()));
+        }
+        if let Some(rest) = t.strip_prefix(&format!("{v}.")) {
+            let nums: Vec<u64> = rest
+                .split('.')
+                .map(|s| s.parse::<u64>().unwrap_or(0))
+                .collect();
+            candidates.push((nums, t.clone()));
+        } else if let Some(rest) = t.strip_prefix(&format!("v{v}.")) {
+            let nums: Vec<u64> = rest
+                .split('.')
+                .map(|s| s.parse::<u64>().unwrap_or(0))
+                .collect();
+            candidates.push((nums, t.clone()));
+        }
+    }
+    if !candidates.is_empty() {
+        candidates.sort_by(|a, b| a.0.cmp(&b.0));
+        return Ok(candidates.last().map(|(_, tag)| tag.clone()));
+    }
+    Ok(None)
 }
 
 fn get_remote_name(upstream: &git2::Branch) -> Result<String, Error> {

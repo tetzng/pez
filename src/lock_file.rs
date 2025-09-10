@@ -51,8 +51,8 @@ impl LockFile {
         self.plugins.retain(|p| p.source != source);
     }
 
-    pub(crate) fn get_plugin(&self, source: &str) -> Option<&Plugin> {
-        self.plugins.iter().find(|p| p.source == source)
+    pub(crate) fn get_plugin_by_repo(&self, repo: &PluginRepo) -> Option<&Plugin> {
+        self.plugins.iter().find(|p| &p.repo == repo)
     }
 
     pub(crate) fn update_plugin(&mut self, plugin: Plugin) {
