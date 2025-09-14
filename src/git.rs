@@ -1,3 +1,4 @@
+use crate::resolver::Selection;
 use git2::{Cred, Error, FetchOptions, RemoteCallbacks};
 use std::path;
 
@@ -127,15 +128,6 @@ pub(crate) fn list_tags(repo: &git2::Repository) -> anyhow::Result<Vec<String>> 
         }
     }
     Ok(tags)
-}
-
-pub(crate) enum Selection {
-    DefaultHead,
-    Latest,
-    Branch(String),
-    Tag(String),
-    Commit(String),
-    Version(String),
 }
 
 pub(crate) fn resolve_selection(
