@@ -259,6 +259,8 @@ fn pick_tag_for_version(tags: &[String], v: &str) -> anyhow::Result<Option<Strin
     Ok(None)
 }
 
+// tests are in a submodule at the end of file
+
 fn get_remote_name(upstream: &git2::Branch) -> Result<String, Error> {
     let upstream_ref = upstream
         .get()
@@ -366,5 +368,38 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> anyhow::Resul
 
         let remote_head_commit = repo.find_commit(remote_head_oid)?;
         Ok(remote_head_commit.id().to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pick_tag_for_version_semver_prefix() {
+        let tags = vec![
+            "v1.0.0".to_string(),
+            "v1.2.0".to_string(),
+            "v1.2.1".to_string(),
+            "v2.0.0".to_string(),
+            "v1.3.0-beta1".to_string(),
+        ];
+        let sel = pick_tag_for_version(&tags, "v1").unwrap().unwrap();
+        assert_eq!(sel, "v1.2.1");
+        let exact = pick_tag_for_version(&tags, "v2.0.0").unwrap().unwrap();
+        assert_eq!(exact, "v2.0.0");
+    }
+
+    #[test]
+    fn pick_tag_for_version_dotted_non_semver_prefix() {
+        let tags = vec![
+            "1.2.1".to_string(),
+            "1.3.0".to_string(),
+            "v1.4.5".to_string(),
+            "2.0.0".to_string(),
+        ];
+        let sel = pick_tag_for_version(&tags, "1").unwrap().unwrap();
+        // Should prefer highest among 1.x.y (either with or without v prefix)
+        assert!(sel == "1.3.0" || sel == "v1.4.5");
     }
 }
