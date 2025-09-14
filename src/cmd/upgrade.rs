@@ -1,9 +1,9 @@
 use crate::{
-    cli::{PluginRepo, UpgradeArgs},
+    cli::UpgradeArgs,
     config::PluginSpec,
     git,
     lock_file::Plugin,
-    models::TargetDir,
+    models::{PluginRepo, TargetDir},
     utils,
 };
 

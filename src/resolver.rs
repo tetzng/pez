@@ -1,6 +1,6 @@
 use crate::config::PluginSource;
 
-use crate::cli::PluginRepo;
+use crate::models::PluginRepo;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum RefKind {

@@ -29,14 +29,14 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
 
     let file = fs::File::open(&fisher_plugins_path)?;
     let reader = BufReader::new(file);
-    let mut repos: Vec<crate::cli::PluginRepo> = Vec::new();
+    let mut repos: Vec<crate::models::PluginRepo> = Vec::new();
     for line in reader.lines() {
         let line = line?;
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        match trimmed.parse::<crate::cli::PluginRepo>() {
+        match trimmed.parse::<crate::models::PluginRepo>() {
             Ok(repo) => {
                 if repo.owner == "jorgebucaran" && repo.repo == "fisher" {
                     continue;
@@ -149,7 +149,7 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
         let targets: Vec<_> = planned
             .iter()
             .filter_map(|p| p.get_plugin_repo().ok())
-            .map(|r| crate::cli::InstallTarget::from_raw(r.as_str()))
+            .map(|r| crate::models::InstallTarget::from_raw(r.as_str()))
             .collect();
         let install_args = InstallArgs {
             plugins: Some(targets),

@@ -1,8 +1,4 @@
-use crate::{
-    cli::{PluginRepo, UninstallArgs},
-    models::TargetDir,
-    utils,
-};
+use crate::{cli::UninstallArgs, models::PluginRepo, models::TargetDir, utils};
 
 use console::Emoji;
 use futures::{StreamExt, stream};
@@ -12,12 +8,16 @@ use tracing::{error, info, warn};
 pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
     info!("{}Starting uninstallation process...", Emoji("🔍 ", ""));
     let jobs = utils::load_jobs();
-    let tasks = stream::iter(args.plugins.iter())
+    let plugins: Vec<PluginRepo> = args.plugins.clone().unwrap_or_default();
+    if plugins.is_empty() {
+        anyhow::bail!("No plugins specified for uninstall");
+    }
+    let tasks = stream::iter(plugins.iter())
         .map(|plugin| {
             let plugin = plugin.clone();
             let force = args.force;
             tokio::task::spawn_blocking(move || {
-                info!("\n{}Uninstalling plugin: {}", Emoji("✨ ", ""), &plugin);
+                info!("\n{}Uninstalling plugin: {}", Emoji("✨ ", ""), plugin);
                 uninstall(&plugin, force)
             })
         })
@@ -33,6 +33,27 @@ pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+#[allow(dead_code)]
+fn read_plugins_from_stdin() -> anyhow::Result<Vec<PluginRepo>> {
+    use std::io::{self, Read};
+    let mut buf = String::new();
+    io::stdin().read_to_string(&mut buf)?;
+    let mut out = Vec::new();
+    for line in buf.lines() {
+        let s = line.trim();
+        if s.is_empty() || s.starts_with('#') {
+            continue;
+        }
+        match s.parse::<PluginRepo>() {
+            Ok(p) => out.push(p),
+            Err(_) => warn!("{}Skipping unrecognized entry: {}", Emoji("⚠ ", ""), s),
+        }
+    }
+    out.sort_by_key(|a| a.as_str());
+    out.dedup_by(|a, b| a.as_str() == b.as_str());
+    Ok(out)
 }
 
 pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result<()> {

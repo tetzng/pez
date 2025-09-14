@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand};
-use regex::Regex;
+// keep derives in case of future clap value types
+#[allow(unused_imports)]
 use serde_derive::{Deserialize, Serialize};
-use std::fmt;
 
 #[derive(Parser, Debug)]
 #[command(name = "pez", version, about, long_about = None)]
@@ -50,7 +50,7 @@ pub(crate) enum Commands {
 #[derive(Args, Debug)]
 pub(crate) struct InstallArgs {
     /// Plugin sources: `owner/repo[@ref]`, `host/owner/repo[@ref]`, full URL, or local path
-    pub(crate) plugins: Option<Vec<InstallTarget>>,
+    pub(crate) plugins: Option<Vec<crate::models::InstallTarget>>,
 
     /// Force install even if the plugin is already installed
     #[arg(short, long)]
@@ -64,8 +64,7 @@ pub(crate) struct InstallArgs {
 #[derive(Args, Debug)]
 pub(crate) struct UninstallArgs {
     /// GitHub repo in the format `owner/repo`
-    #[arg(required = true)]
-    pub(crate) plugins: Vec<PluginRepo>,
+    pub(crate) plugins: Option<Vec<crate::models::PluginRepo>>,
 
     /// Force uninstall even if the plugin data directory does not exist
     #[arg(short, long)]
@@ -75,7 +74,7 @@ pub(crate) struct UninstallArgs {
 #[derive(Args, Debug)]
 pub(crate) struct UpgradeArgs {
     /// GitHub repo in the format `owner/repo`
-    pub(crate) plugins: Option<Vec<PluginRepo>>,
+    pub(crate) plugins: Option<Vec<crate::models::PluginRepo>>,
 }
 
 #[derive(Args, Debug)]
@@ -128,105 +127,9 @@ pub(crate) enum DoctorFormat {
     Json,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(try_from = "String", into = "String")]
-pub(crate) struct PluginRepo {
-    pub owner: String,
-    pub repo: String,
-}
+// Types moved to models.rs: PluginRepo, InstallTarget, ResolvedInstallTarget
 
-impl TryFrom<String> for PluginRepo {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.parse()
-    }
-}
-
-impl From<PluginRepo> for String {
-    fn from(plugin_repo: PluginRepo) -> Self {
-        plugin_repo.as_str()
-    }
-}
-
-impl PluginRepo {
-    pub fn as_str(&self) -> String {
-        format!("{}/{}", self.owner, self.repo)
-    }
-}
-
-impl fmt::Display for PluginRepo {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl std::str::FromStr for PluginRepo {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let re = Regex::new(r"^[a-zA-Z0-9-]+/[a-zA-Z0-9_.-]+$").unwrap();
-        if re.is_match(s) && !s.ends_with('.') {
-            let parts: Vec<&str> = s.split('/').collect();
-            Ok(PluginRepo {
-                owner: parts[0].to_string(),
-                repo: parts[1].to_string(),
-            })
-        } else {
-            Err(format!(
-                "Invalid format: {s}. Expected format: <owner>/<repo>"
-            ))
-        }
-    }
-}
-
-/// A user-supplied install target that can be a repo, URL, or local path.
-/// Supported examples:
-/// - `owner/repo`
-/// - `owner/repo@v3`
-/// - `gitlab.com/owner/repo`
-/// - `gitlab.com/owner/repo@branch`
-/// - <https://example.com/owner/repo>
-/// - `~/path/to/repo` or `./relative/path`
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(try_from = "String", into = "String")]
-pub(crate) struct InstallTarget {
-    raw: String,
-}
-
-impl TryFrom<String> for InstallTarget {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Ok(InstallTarget { raw: value })
-    }
-}
-
-impl From<InstallTarget> for String {
-    fn from(val: InstallTarget) -> Self {
-        val.raw
-    }
-}
-
-impl std::str::FromStr for InstallTarget {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(InstallTarget { raw: s.to_string() })
-    }
-}
-
-/// Result of parsing an `InstallTarget` into concrete fields used by commands.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ResolvedInstallTarget {
-    pub plugin_repo: PluginRepo,
-    /// Repository base source (URL or local path, without @ref).
-    pub source: String,
-    /// Optional ref selection.
-    pub ref_kind: crate::resolver::RefKind,
-    /// Whether the source is a local filesystem path.
-    pub is_local: bool,
-}
+use crate::models::{InstallTarget, PluginRepo, ResolvedInstallTarget};
 
 impl InstallTarget {
     /// Create an InstallTarget from a raw string.

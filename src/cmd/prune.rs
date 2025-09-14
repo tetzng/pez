@@ -357,8 +357,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        cli::PluginRepo,
         lock_file::{self, PluginFile},
+        models::PluginRepo,
         models::TargetDir,
         tests_support::env::TestEnvironmentSetup,
     };
