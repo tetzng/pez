@@ -23,7 +23,7 @@ cargo install --path .
 # 1) Initialize configuration (creates pez.toml)
 pez init
 
-# 2) Add a plugin to pez.toml (repo/url/path のいずれか)
+# 2) Add a plugin to pez.toml (choose one of repo/url/path)
 #    [[plugins]]
 #    repo = "owner/repo"      # GitHub shorthand
 #    # version = "v3"        # Or: tag = "...", branch = "...", commit = "..."
@@ -34,6 +34,7 @@ pez init
 #
 #    # [[plugins]]
 #    # path = "~/path/to/local/plugin"       # Local directory (absolute or ~/ only)
+#    # Note: when specifying a relative path at the CLI (e.g., ./plugin), pez normalizes it to an absolute path in pez.toml.
 
 # 3) Install plugins listed in pez.toml
 pez install
@@ -190,7 +191,7 @@ Configuration File Locations
 The configuration files are located based on the following priority:
 `$PEZ_CONFIG_DIR` > `$__fish_config_dir` > `$XDG_CONFIG_HOME/fish` > `~/.config/fish`
 
-### pez.toml（新スキーマ）
+### pez.toml (Schema)
 
 `pez.toml` is the primary configuration file where you define the plugins
 you want to manage. Below is an example structure:

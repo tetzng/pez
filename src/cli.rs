@@ -237,7 +237,7 @@ impl InstallTarget {
     /// Rules:
     /// - `owner/repo[@ref]` => github.com
     /// - `host/owner/repo[@ref]` (no scheme) => <https://host/owner/repo>
-    /// - URLs with scheme left as-is (no @ref parsing to avoid ssh user@ conflicts)
+    /// - URLs with scheme left as-is (no `@ref` parsing to avoid ssh user@ conflicts)
     /// - Paths beginning with '/', './', '../', or '~' are treated as local
     pub fn resolve(&self) -> anyhow::Result<ResolvedInstallTarget> {
         use anyhow::Context;
@@ -272,7 +272,14 @@ impl InstallTarget {
         };
 
         if looks_like_path {
-            let path_str = expand_tilde(raw)?;
+            let mut path_str = expand_tilde(raw)?;
+            // Normalize relative paths (./, ../, .) to absolute using current_dir
+            if path_str == "." || path_str.starts_with("./") || path_str.starts_with("../") {
+                let abs = std::env::current_dir()
+                    .context("Failed to read current working directory")?
+                    .join(&path_str);
+                path_str = abs.to_string_lossy().to_string();
+            }
             let plugin_name = std::path::Path::new(&path_str)
                 .file_name()
                 .and_then(|s| s.to_str())
@@ -391,6 +398,13 @@ mod tests {
         let t = InstallTarget::from_raw(home.to_string());
         let r = t.resolve().unwrap();
         assert!(r.is_local);
+
+        // relative path should be normalized to absolute
+        let t = InstallTarget::from_raw("./some/dir");
+        let r = t.resolve().unwrap();
+        assert!(r.is_local);
+        let cwd = std::env::current_dir().unwrap();
+        assert!(r.source.starts_with(&*cwd.to_string_lossy()));
     }
 }
 
