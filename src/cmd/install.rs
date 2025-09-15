@@ -375,6 +375,7 @@ async fn sync_plugin_files(
 }
 
 fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
+    use std::collections::HashSet;
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
     let (config, _) = utils::load_config()?;
 
@@ -385,6 +386,9 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
             vec![]
         }
     };
+
+    // Track destination paths we've populated to detect duplicates across plugins
+    let mut dest_paths: HashSet<path::PathBuf> = HashSet::new();
 
     for plugin_spec in plugin_specs.iter() {
         let resolved = plugin_spec.to_resolved()?;
@@ -456,10 +460,30 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     commit_sha,
                     files: vec![],
                 };
-                if git::is_local_source(&source_base) {
-                    utils::copy_plugin_files_from_repo(path::Path::new(&source_base), &mut plugin)?;
+                let (repo_base, config_dir) = if git::is_local_source(&source_base) {
+                    (
+                        path::PathBuf::from(&source_base),
+                        utils::load_fish_config_dir()?,
+                    )
                 } else {
-                    utils::copy_plugin_files_from_repo(&repo_path, &mut plugin)?;
+                    (repo_path.clone(), utils::load_fish_config_dir()?)
+                };
+
+                info!("{}Copying files:", Emoji("📂 ", ""));
+                let outcome = utils::copy_plugin_files(
+                    &repo_base,
+                    &config_dir,
+                    &mut plugin,
+                    Some(&mut dest_paths),
+                    true,
+                )?;
+                if outcome.skipped_due_to_duplicate {
+                    warn!(
+                        "{} Skipping plugin due to duplicate: {}",
+                        Emoji("🚨 ", ""),
+                        plugin.repo
+                    );
+                    plugin.files.clear();
                 }
                 emit_event(&plugin, &utils::Event::Install)?;
 
@@ -577,13 +601,15 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 let fish_config_dir = utils::load_fish_config_dir()?;
                 plugin.files.iter().for_each(|file| {
                     let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
-                    if dest_path.exists() {
-                        let path_display = dest_path.display();
-                        info!("   - {}", path_display);
-                        fs::remove_file(&dest_path).unwrap();
+                    if dest_path.exists()
+                        && let Err(e) = fs::remove_file(&dest_path)
+                    {
+                        warn!("Failed to remove {}: {:?}", dest_path.display(), e);
                     }
                     lock_file.remove_plugin(&plugin.source);
-                    lock_file.save(&lock_file_path).unwrap();
+                    if let Err(e) = lock_file.save(&lock_file_path) {
+                        warn!("Failed to save lock file: {:?}", e);
+                    }
                 });
             }
         } else {
