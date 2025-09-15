@@ -158,9 +158,8 @@ When installing plugins (either from pez.toml or explicit targets), pez detects
 duplicate destination paths across all plugins in the same run and skips the
 conflicting plugin with a warning to avoid overwriting existing files.
 
-The destination fish configuration directory can be overridden
-using the following environment variables:
-`$__fish_config_dir` > `$XDG_CONFIG_HOME/fish` > `~/.config/fish`
+The destination fish configuration directory can be overridden using:
+`$PEZ_TARGET_DIR` > `$__fish_config_dir` > `$XDG_CONFIG_HOME/fish` > `~/.config/fish`
 
 Additionally, `pez-lock.toml` records information about the installed packages
 and the files copied. It is created in the same directory as `pez.toml`

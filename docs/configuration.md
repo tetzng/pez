@@ -81,6 +81,7 @@ Notes
 
 - `PEZ_CONFIG_DIR` — Directory containing `pez.toml` and `pez-lock.toml`.
 - `PEZ_DATA_DIR` — Base directory for cloned plugin repositories.
+- `PEZ_TARGET_DIR` — Override destination Fish config directory used for copying plugin files.
 - `__fish_config_dir` / `XDG_CONFIG_HOME` — Fish configuration directory.
 - `__fish_user_data_dir` / `XDG_DATA_HOME` — Fish data directory.
 - `PEZ_JOBS` — Concurrency for `upgrade`, `uninstall`, and `prune` (default: 4).
