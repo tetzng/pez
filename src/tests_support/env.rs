@@ -1,5 +1,5 @@
-use crate::cli::PluginRepo;
 use crate::lock_file::PluginFile;
+use crate::models::PluginRepo;
 use crate::{config, lock_file::LockFile};
 use std::{fs, path};
 

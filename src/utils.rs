@@ -344,7 +344,7 @@ mod tests {
     use config::{PluginSource, PluginSpec};
 
     use super::*;
-    use crate::cli::PluginRepo;
+    use crate::models::PluginRepo;
     use crate::models::TargetDir;
     use crate::tests_support::env::TestEnvironmentSetup;
 

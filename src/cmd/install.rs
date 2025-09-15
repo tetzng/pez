@@ -1,10 +1,11 @@
 use crate::resolver;
 use crate::resolver::{ref_kind_to_repo_source, ref_kind_to_url_source};
 use crate::{
-    cli::{InstallArgs, InstallTarget, PluginRepo, ResolvedInstallTarget},
+    cli::InstallArgs,
     config, git,
     lock_file::{LockFile, Plugin},
     models::TargetDir,
+    models::{InstallTarget, PluginRepo, ResolvedInstallTarget},
     utils,
 };
 
@@ -657,7 +658,7 @@ mod tests {
         test_env.setup_config(config::Config { plugins: None });
 
         let config = test_env.config.as_mut().expect("Config is not initialized");
-        let targets = vec![crate::cli::InstallTarget::from_raw("owner/new-repo")];
+        let targets = vec![crate::models::InstallTarget::from_raw("owner/new-repo")];
 
         let result = add_plugins_to_config(config, &test_env.config_path, &targets);
         assert!(result.is_ok());
@@ -682,7 +683,7 @@ mod tests {
         let config = test_env.config.as_mut().expect("Config is not initialized");
         assert_eq!(config.plugins.as_ref().unwrap().len(), 1);
 
-        let targets = vec![crate::cli::InstallTarget::from_raw("owner/added-repo")];
+        let targets = vec![crate::models::InstallTarget::from_raw("owner/added-repo")];
 
         let result = add_plugins_to_config(config, &test_env.config_path, &targets);
         assert!(result.is_ok());
@@ -707,7 +708,7 @@ mod tests {
         let config = test_env.config.as_mut().expect("Config is not initialized");
         assert_eq!(config.plugins.as_ref().unwrap().len(), 1);
 
-        let targets = vec![crate::cli::InstallTarget::from_raw("owner/new-repo")];
+        let targets = vec![crate::models::InstallTarget::from_raw("owner/new-repo")];
 
         let result = add_plugins_to_config(config, &test_env.config_path, &targets);
         assert!(result.is_ok());

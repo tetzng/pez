@@ -18,7 +18,7 @@ pub(crate) struct PluginSpec {
 pub(crate) enum PluginSource {
     // GitHub shorthand: { repo = "owner/repo", [version|branch|tag|commit] = "..." }
     Repo {
-        repo: crate::cli::PluginRepo,
+        repo: crate::models::PluginRepo,
         #[serde(default)]
         version: Option<String>,
         #[serde(default)]
@@ -79,7 +79,7 @@ impl PluginSpec {
     /// - Github: uses provided owner/repo
     /// - Git URL: attempts to parse last two path segments as owner/repo
     /// - Path: owner = "local", repo = basename of path
-    pub(crate) fn get_plugin_repo(&self) -> anyhow::Result<crate::cli::PluginRepo> {
+    pub(crate) fn get_plugin_repo(&self) -> anyhow::Result<crate::models::PluginRepo> {
         match &self.source {
             PluginSource::Repo { repo, .. } => Ok(repo.clone()),
             PluginSource::Url { url, .. } => {
@@ -97,7 +97,7 @@ impl PluginSpec {
                     .nth(1)
                     .unwrap_or("owner")
                     .to_string();
-                Ok(crate::cli::PluginRepo {
+                Ok(crate::models::PluginRepo {
                     owner,
                     repo: repo_name,
                 })
@@ -109,7 +109,7 @@ impl PluginSpec {
                     .and_then(|s| s.to_str())
                     .ok_or_else(|| anyhow::anyhow!("Invalid local path: {expanded}"))?
                     .to_string();
-                Ok(crate::cli::PluginRepo {
+                Ok(crate::models::PluginRepo {
                     owner: "local".to_string(),
                     repo: name,
                 })
@@ -118,7 +118,7 @@ impl PluginSpec {
     }
 
     /// Convert to a ResolvedInstallTarget for installation flows.
-    pub(crate) fn to_resolved(&self) -> anyhow::Result<crate::cli::ResolvedInstallTarget> {
+    pub(crate) fn to_resolved(&self) -> anyhow::Result<crate::models::ResolvedInstallTarget> {
         let plugin_repo = self.get_plugin_repo()?;
         match &self.source {
             PluginSource::Repo {
@@ -130,7 +130,7 @@ impl PluginSpec {
             } => {
                 let src = format!("https://github.com/{}", plugin_repo.as_str());
                 let refspec = pick_single_ref(version, branch, tag, commit)?;
-                Ok(crate::cli::ResolvedInstallTarget {
+                Ok(crate::models::ResolvedInstallTarget {
                     plugin_repo,
                     source: src,
                     ref_kind: crate::resolver::RefKind::from(refspec),
@@ -149,7 +149,7 @@ impl PluginSpec {
                     normalized = format!("https://{normalized}");
                 }
                 let refspec = pick_single_ref(version, branch, tag, commit)?;
-                Ok(crate::cli::ResolvedInstallTarget {
+                Ok(crate::models::ResolvedInstallTarget {
                     plugin_repo,
                     source: normalized,
                     ref_kind: crate::resolver::RefKind::from(refspec),
@@ -163,7 +163,7 @@ impl PluginSpec {
                         "path must be absolute or start with ~/ (after expansion must be absolute)"
                     );
                 }
-                Ok(crate::cli::ResolvedInstallTarget {
+                Ok(crate::models::ResolvedInstallTarget {
                     plugin_repo,
                     source: expanded,
                     ref_kind: crate::resolver::RefKind::None,
@@ -181,7 +181,7 @@ mod internal_tests {
     #[test]
     fn repo_to_resolved_latest() {
         let s = PluginSource::Repo {
-            repo: crate::cli::PluginRepo {
+            repo: crate::models::PluginRepo {
                 owner: "o".into(),
                 repo: "r".into(),
             },
@@ -233,7 +233,7 @@ mod internal_tests {
     #[test]
     fn one_of_rule_enforced() {
         let s = PluginSource::Repo {
-            repo: crate::cli::PluginRepo {
+            repo: crate::models::PluginRepo {
                 owner: "o".into(),
                 repo: "r".into(),
             },
@@ -330,7 +330,7 @@ mod tests {
     #[test]
     fn repo_to_resolved_latest() {
         let s = PluginSource::Repo {
-            repo: crate::cli::PluginRepo {
+            repo: crate::models::PluginRepo {
                 owner: "o".into(),
                 repo: "r".into(),
             },
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn one_of_rule_enforced() {
         let s = PluginSource::Repo {
-            repo: crate::cli::PluginRepo {
+            repo: crate::models::PluginRepo {
                 owner: "o".into(),
                 repo: "r".into(),
             },

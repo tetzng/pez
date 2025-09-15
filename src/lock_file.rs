@@ -1,4 +1,4 @@
-use crate::{cli::PluginRepo, models::TargetDir};
+use crate::{models::PluginRepo, models::TargetDir};
 
 use serde_derive::{Deserialize, Serialize};
 use std::{fs, path};

@@ -202,7 +202,7 @@ fn list_outdated_json(plugins: &[Plugin]) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use crate::lock_file::Plugin;
-    use cli::PluginRepo;
+    use crate::models::PluginRepo;
 
     #[test]
     fn test_display_plugins() {
