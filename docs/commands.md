@@ -30,10 +30,10 @@ Global options
 
 ## upgrade
 
-- Upgrades specified plugins (`owner/repo ...`), or with no arguments, upgrades plugins listed in `pez.toml`.
-- For non‑local plugins, update to the latest commit on the remote's default branch (remote HEAD). Local sources are skipped.
-- Selectors in `pez.toml` (version/branch/tag/commit) are not applied by `upgrade`; they affect initial install and re‑install with `install --force`.
-- Concurrency is controlled by `PEZ_JOBS`.
+- 指定したプラグイン（`owner/repo ...`）を更新。引数なしの場合は `pez.toml` に記載されたプラグインを更新。
+- `pez.toml` のセレクタ（`version`/`branch`/`tag`/`commit`）を尊重して解決します。セレクタが未指定のときは、リモートのデフォルトブランチ（remote HEAD）の最新コミットに更新します。
+- ローカルソース（`path`）はスキップします。
+- 並列数は `PEZ_JOBS` で制御します。
 
 ## list
 
