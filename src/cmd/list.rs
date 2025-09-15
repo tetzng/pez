@@ -74,13 +74,16 @@ fn display_plugins<W: io::Write>(plugins: &[Plugin], mut writer: W) -> anyhow::R
 }
 
 fn display_plugins_in_table(plugins: &[Plugin]) {
+    fn short7(s: &str) -> String {
+        s.chars().take(7).collect()
+    }
     let plugin_rows = plugins
         .iter()
         .map(|p| PluginRow {
             name: p.get_name(),
             repo: p.repo.as_str().clone(),
             source: p.source.clone(),
-            commit: p.commit_sha[..7].to_string(),
+            commit: short7(&p.commit_sha),
         })
         .collect::<Vec<PluginRow>>();
     let table = Table::new(&plugin_rows);
@@ -120,6 +123,9 @@ fn get_outdated_plugins(plugins: &[Plugin]) -> anyhow::Result<Vec<Plugin>> {
 }
 
 fn list_outdated_table(plugins: &[Plugin]) -> anyhow::Result<()> {
+    fn short7(s: &str) -> String {
+        s.chars().take(7).collect()
+    }
     let data_dir = utils::load_pez_data_dir()?;
     let outdated_plugins = get_outdated_plugins(plugins)?;
     if outdated_plugins.is_empty() {
@@ -133,14 +139,14 @@ fn list_outdated_table(plugins: &[Plugin]) -> anyhow::Result<()> {
             name: p.get_name(),
             repo: p.repo.as_str().clone(),
             source: p.source.clone(),
-            current: p.commit_sha[..7].to_string(),
+            current: short7(&p.commit_sha),
             latest: {
                 let repo_path = data_dir.join(p.repo.as_str());
                 match git2::Repository::open(&repo_path)
                     .ok()
                     .and_then(|r| git::get_latest_remote_commit(&r).ok())
                 {
-                    Some(s) => s[..7].to_string(),
+                    Some(s) => short7(&s),
                     None => "—".to_string(),
                 }
             },
