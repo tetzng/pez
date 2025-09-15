@@ -19,7 +19,8 @@ Global options
   - CLI‑specified targets are appended to `pez.toml` (relative paths are normalized to absolute).
   - `owner/repo` resolves to `https://github.com/owner/repo`; `host/...` without a scheme is normalized to `https://host/...`.
   - Selectors: `@latest`, `@version:<v>`, `@branch:<b>`, `@tag:<t>`, `@commit:<sha>` influence the resolved commit for fresh installs and `install --force`.
-  - Concurrency: with explicit targets, clones run concurrently and file copies run sequentially with duplicate‑path detection; from `pez.toml` (no targets), processing is sequential and destination files are overwritten.
+  - Duplicate files: pez maintains a set of destination paths encountered during the run and skips a plugin if copying would overwrite an existing file (applies to both CLI targets and `pez.toml`). A warning is printed and the plugin’s files are not recorded.
+  - Concurrency: with explicit targets, clones run concurrently and file copies run sequentially with duplicate‑path detection; installs from `pez.toml` are processed sequentially with the same duplicate detection.
 
 ## uninstall
 
