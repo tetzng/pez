@@ -1,9 +1,12 @@
 name: release
 
+permissions:
+  contents: read
+
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
 
 jobs:
   build:
