@@ -24,9 +24,13 @@ Global options
 
 ## uninstall
 
-- Remove the specified plugins (`owner/repo`). At least one plugin must be provided.
-- Options: `--force` (remove destination files even if the repo directory is missing).
-- Behavior: removes the cloned repo (if present) and files recorded in `pez-lock.toml`. Without `--force` and a missing repo directory, the command lists the files and aborts.
+- Remove the specified plugins (`owner/repo`). With `--stdin`, also read plugin repos from standard input (one per line).
+- Options:
+  - `--force` Remove files recorded in the lockfile even if the repository directory is missing.
+  - `--stdin` Read `owner/repo` list from stdin (ignores blank lines and lines starting with `#`).
+- Behavior: removes the cloned repository (if present) and files recorded in `pez-lock.toml`. Without `--force` when the repo directory is missing, the command prints the target files and aborts.
+- Example:
+  - `printf "owner/a\nowner/b\n" | pez uninstall --stdin`
 
 ## upgrade
 

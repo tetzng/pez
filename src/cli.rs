@@ -69,6 +69,10 @@ pub(crate) struct UninstallArgs {
     /// Force uninstall even if the plugin data directory does not exist
     #[arg(short, long)]
     pub(crate) force: bool,
+
+    /// Read plugin repos from stdin (one per line)
+    #[arg(long)]
+    pub(crate) stdin: bool,
 }
 
 #[derive(Args, Debug)]
