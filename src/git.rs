@@ -18,6 +18,8 @@ pub(crate) fn clone_repository(
 
 fn setup_remote_callbacks() -> RemoteCallbacks<'static> {
     let mut callbacks = RemoteCallbacks::new();
+    // Use libgit2's default credential negotiation which covers HTTPS, SSH agent,
+    // and other common flows. This matches the behavior used in clone_repository.
     callbacks.credentials(|_, _, _| Cred::default());
     callbacks
 }
@@ -56,14 +58,7 @@ pub(crate) fn is_local_source(source: &str) -> bool {
 }
 
 pub(crate) fn fetch_all(repo: &git2::Repository) -> anyhow::Result<()> {
-    let mut cb = RemoteCallbacks::new();
-    cb.credentials(|_url, username, _allowed| {
-        if let Some(username) = username {
-            Cred::ssh_key_from_agent(username)
-        } else {
-            Err(git2::Error::from_str("No username provided"))
-        }
-    });
+    let cb = setup_remote_callbacks();
     let mut fo = FetchOptions::new();
     fo.remote_callbacks(cb);
     fo.download_tags(git2::AutotagOption::All);
@@ -294,15 +289,7 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> anyhow::Resul
 
         let mut remote = repo.find_remote(&remote_name)?;
 
-        let mut cb = RemoteCallbacks::new();
-        cb.credentials(|_url, username, _allowed| {
-            if let Some(username) = username {
-                Cred::ssh_key_from_agent(username)
-            } else {
-                Err(git2::Error::from_str("No username provided"))
-            }
-        });
-
+        let cb = setup_remote_callbacks();
         let mut fetch_options = FetchOptions::new();
         fetch_options.remote_callbacks(cb);
 
@@ -334,15 +321,7 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> anyhow::Resul
 
         let mut remote = repo.find_remote(remote_name)?;
 
-        let mut cb = RemoteCallbacks::new();
-        cb.credentials(|_url, username, _allowed| {
-            if let Some(username) = username {
-                Cred::ssh_key_from_agent(username)
-            } else {
-                Err(git2::Error::from_str("No username provided"))
-            }
-        });
-
+        let cb = setup_remote_callbacks();
         let mut fetch_options = FetchOptions::new();
         fetch_options.remote_callbacks(cb);
 
