@@ -169,8 +169,8 @@ and will append information if it already exists.
 ### Concurrency
 
 Control job parallelism with `PEZ_JOBS` (default: 4):
-- `install` (CLIで明示ターゲットを指定した場合) の clone は `PEZ_JOBS` で制限
-- `upgrade` / `uninstall` / `prune` も同様に `PEZ_JOBS` を使用
+- `install` (when CLI explicit targets are given): cloning is bounded by `PEZ_JOBS`
+- `upgrade` / `uninstall` / `prune` also honor `PEZ_JOBS`
 
 ## Acknowledgements
 
