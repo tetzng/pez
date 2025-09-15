@@ -154,9 +154,9 @@ to the corresponding fish configuration directories:
 - `~/.config/fish/conf.d`
 - `~/.config/fish/themes`
 
-When installing from pez.toml (no explicit targets), existing files at the
-destination are overwritten. When installing explicit targets on the CLI,
-duplicate destination paths are skipped with a warning to avoid conflicts.
+When installing plugins (either from pez.toml or explicit targets), pez detects
+duplicate destination paths across all plugins in the same run and skips the
+conflicting plugin with a warning to avoid overwriting existing files.
 
 The destination fish configuration directory can be overridden
 using the following environment variables:
