@@ -101,9 +101,9 @@ where
 
     if ctx.config.plugins.is_none() {
         warn!(
-            "{}{} No plugins are defined in pez.toml.",
+            "{} {} No plugins are defined in pez.toml.",
             Emoji("🚧 ", ""),
-            console::style("Warning:").yellow()
+            crate::utils::label_warning()
         );
         warn!(
             "{}All plugins defined in pez-lock.toml will be removed.",
@@ -122,9 +122,9 @@ where
         } else {
             let path_display = repo_path.display();
             warn!(
-                "{}{} Repository directory at {} does not exist.",
+                "{} {} Repository directory at {} does not exist.",
                 Emoji("🚧 ", ""),
-                console::style("Warning:").yellow(),
+                crate::utils::label_warning(),
                 path_display
             );
 
@@ -182,9 +182,9 @@ async fn prune_parallel(force: bool, yes: bool, ctx: &mut PruneContext<'_>) -> a
 
     if ctx.config.plugins.is_none() {
         warn!(
-            "{}{} No plugins are defined in pez.toml.",
+            "{} {} No plugins are defined in pez.toml.",
             Emoji("🚧 ", ""),
-            console::style("Warning:").yellow()
+            crate::utils::label_warning()
         );
         warn!(
             "{}All plugins defined in pez-lock.toml will be removed.",
@@ -212,9 +212,9 @@ async fn prune_parallel(force: bool, yes: bool, ctx: &mut PruneContext<'_>) -> a
                 } else {
                     let path_display = repo_path.display();
                     warn!(
-                        "{}{} Repository directory at {} does not exist.",
+                        "{} {} Repository directory at {} does not exist.",
                         Emoji("🚧 ", ""),
-                        console::style("Warning:").yellow(),
+                        crate::utils::label_warning(),
                         path_display
                     );
                     if !force {
@@ -276,9 +276,9 @@ async fn prune_parallel(force: bool, yes: bool, ctx: &mut PruneContext<'_>) -> a
 fn dry_run(force: bool, ctx: &mut PruneContext) -> anyhow::Result<()> {
     if ctx.config.plugins.is_none() {
         warn!(
-            "{}{} No plugins are defined in pez.toml.",
+            "{} {} No plugins are defined in pez.toml.",
             Emoji("🚧 ", ""),
-            console::style("Warning:").yellow()
+            crate::utils::label_warning()
         );
         warn!(
             "{}All plugins defined in pez-lock.toml will be removed.",
@@ -314,9 +314,9 @@ fn dry_run(force: bool, ctx: &mut PruneContext) -> anyhow::Result<()> {
         if !repo_path.exists() {
             let path_display = repo_path.display();
             warn!(
-                "{}{} Repository directory at {} does not exist.",
+                "{} {} Repository directory at {} does not exist.",
                 Emoji("🚧 ", ""),
-                console::style("Warning:").yellow(),
+                crate::utils::label_warning(),
                 path_display
             );
 

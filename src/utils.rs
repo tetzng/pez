@@ -333,13 +333,62 @@ pub(crate) fn emit_event(file_name_or_path: &str, event: &Event) -> anyhow::Resu
 }
 
 fn warn_no_plugin_files() {
-    warn!(
-        "{} No valid files found in the repository.",
-        console::style("Warning:").yellow()
-    );
+    warn!("{} No valid files found in the repository.", label_warning());
     warn!(
         "Ensure that it contains at least one file in 'functions', 'completions', 'conf.d', or 'themes'."
     );
+}
+
+// --- Color-aware labels ----------------------------------------------------
+// Colored labels when ANSI is supported; plain otherwise.
+fn colors_enabled_for_stderr() -> bool {
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    if std::env::var_os("CLICOLOR_FORCE").is_some() || std::env::var_os("FORCE_COLOR").is_some() {
+        return true;
+    }
+    if let Ok(v) = std::env::var("CLICOLOR") {
+        if v == "0" { return false; }
+    }
+    if let Ok(term) = std::env::var("TERM") {
+        if term == "dumb" { return false; }
+    }
+    #[allow(deprecated)]
+    use std::io::IsTerminal;
+    std::io::stderr().is_terminal()
+}
+
+pub(crate) fn label_info() -> String {
+    if colors_enabled_for_stderr() {
+        console::Style::new().cyan().apply_to("[Info]").to_string()
+    } else {
+        "[Info]".to_string()
+    }
+}
+
+pub(crate) fn label_warning() -> String {
+    if colors_enabled_for_stderr() {
+        console::Style::new().yellow().apply_to("[Warning]").to_string()
+    } else {
+        "[Warning]".to_string()
+    }
+}
+
+pub(crate) fn label_error() -> String {
+    if colors_enabled_for_stderr() {
+        console::Style::new().red().bold().apply_to("[Error]").to_string()
+    } else {
+        "[Error]".to_string()
+    }
+}
+
+pub(crate) fn label_notice() -> String {
+    if colors_enabled_for_stderr() {
+        console::Style::new().magenta().apply_to("[Notice]").to_string()
+    } else {
+        "[Notice]".to_string()
+    }
 }
 
 #[cfg(test)]

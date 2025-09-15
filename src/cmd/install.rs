@@ -325,9 +325,9 @@ fn handle_existing_repository(
         fs::remove_dir_all(repo_path)?;
     } else {
         anyhow::bail!(
-            "{}{} Plugin already exists: {}, Use --force to reinstall",
+            "{} {} Plugin already exists: {}. Use --force to reinstall",
             Emoji("❌ ", ""),
-            console::style("Error:").red().bold(),
+            crate::utils::label_error(),
             repo.as_str()
         );
     }
@@ -609,7 +609,10 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 }
             }
         } else {
-            info!("\nNotice: The following plugins are in pez-lock.toml but not in pez.toml:");
+            info!(
+                "\n{} The following plugins are in pez-lock.toml but not in pez.toml:",
+                crate::utils::label_notice()
+            );
             for plugin in ignored_lock_file_plugins {
                 info!("  - {}", plugin.name);
             }

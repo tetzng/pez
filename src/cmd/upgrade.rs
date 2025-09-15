@@ -125,9 +125,9 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
             let repo_path = utils::load_pez_data_dir()?.join(lock_file_plugin.repo.as_str());
             if git::is_local_source(&lock_file_plugin.source) {
                 info!(
-                    "{}{} Plugin {} is a local source; skipping upgrade.",
+                    "{} {} Plugin {} is a local source; skipping upgrade.",
                     Emoji("🚧 ", ""),
-                    console::style("Info:").cyan(),
+                    crate::utils::label_info(),
                     plugin_repo
                 );
                 return Ok(());
@@ -158,9 +158,9 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                 };
                 if latest_remote_commit == lock_file_plugin.commit_sha {
                     info!(
-                        "{}{} Plugin {} is already up to date.",
+                        "{} {} Plugin {} is already up to date.",
                         Emoji("🚀 ", ""),
-                        console::style("Info:").cyan(),
+                        crate::utils::label_info(),
                         plugin_repo
                     );
                     return Ok(());
@@ -204,9 +204,9 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
             } else {
                 let path_display = repo_path.display();
                 warn!(
-                    "{}{} Repository directory at {} does not exist.",
+                    "{} {} Repository directory at {} does not exist.",
                     Emoji("🚧 ", ""),
-                    console::style("Warning:").yellow(),
+                    crate::utils::label_warning(),
                     path_display
                 );
                 warn!("{}You need to install the plugin first.", Emoji("🚧 ", ""),);

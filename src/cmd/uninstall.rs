@@ -82,12 +82,12 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 fs::remove_dir_all(&repo_path)?;
             } else {
                 let path_display = repo_path.display();
-                warn!(
-                    "{}{} Repository directory at {} does not exist.",
-                    Emoji("🚧 ", ""),
-                    console::style("Warning:").yellow(),
-                    path_display
-                );
+            warn!(
+                "{} {} Repository directory at {} does not exist.",
+                Emoji("🚧 ", ""),
+                crate::utils::label_warning(),
+                path_display
+            );
                 if !force {
                     info!(
                         "{}Detected plugin files based on pez-lock.toml:",
@@ -128,9 +128,9 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
         }
         None => {
             error!(
-                "{}{} Plugin {} is not installed.",
+                "{} {} Plugin {} is not installed.",
                 Emoji("❌ ", ""),
-                console::style("Error:").red().bold(),
+                crate::utils::label_error(),
                 plugin_repo_str
             );
             anyhow::bail!("Plugin is not installed: {}", plugin_repo_str);
