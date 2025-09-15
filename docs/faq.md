@@ -10,12 +10,11 @@ Under the pez data directory (by default `~/.local/share/fish/pez`). You can ove
 
 ### Why doesn't `upgrade` change my plugin pinned by tag/branch in pez.toml?
 
-`upgrade` updates non‑local plugins to the remote default branch HEAD and ignores selectors. Selectors are honored for fresh installs and `install --force`.
+`upgrade` respects selectors defined in `pez.toml`. If you pin a plugin to a specific `branch`, `tag`, `commit`, or `version`, `upgrade` resolves against that selector. When no selector is set, `upgrade` updates to the latest commit on the remote default branch (remote HEAD).
 
 ### How are duplicates handled when copying files?
 
-- CLI targets (`pez install owner/repo ...`): duplicate destination paths are skipped with a warning.
-- From `pez.toml` (`pez install` with no targets): existing files are overwritten.
+- Duplicate destination paths are detected for both CLI targets and installs from `pez.toml`. Conflicting plugins are skipped with a warning to avoid overwriting existing files.
 
 ### How do I uninstall everything not in pez.toml?
 

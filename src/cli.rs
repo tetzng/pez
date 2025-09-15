@@ -218,7 +218,7 @@ impl InstallTarget {
         // Full URL (leave as-is; no @ref parsing to avoid ssh user@host conflict)
         if has_scheme {
             let url = raw.to_string();
-            // Try to infer owner/repo from path for naming, else fallback to last segment
+            // Try to infer owner/repo from path for naming; otherwise fall back to the last segment
             let repo_name = url
                 .rsplit('/')
                 .next()
@@ -317,7 +317,7 @@ mod tests {
         let r = t.resolve().unwrap();
         assert!(r.is_local);
 
-        // relative path should be normalized to absolute
+        // Relative paths are normalized to absolute using the current working directory
         let t = InstallTarget::from_raw("./some/dir");
         let r = t.resolve().unwrap();
         assert!(r.is_local);

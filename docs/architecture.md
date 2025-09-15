@@ -28,17 +28,17 @@ This document outlines the high‑level structure and flows in pez.
 
 - `PEZ_JOBS` controls concurrency for `upgrade`, `uninstall`, and `prune`.
 - `install` concurrency depends on how it is invoked:
-  - With explicit targets (`install <targets...>`): clones run concurrently (unbounded), file copies run sequentially with duplicate‑path detection and warnings.
-  - From `pez.toml` (no targets): processing is sequential and destination files are overwritten.
+  - With explicit targets (`install <targets...>`): clones run concurrently (bounded by `PEZ_JOBS`), file copies run sequentially with duplicate‑path detection and warnings.
+  - From `pez.toml` (no targets): processing is sequential and uses the same duplicate‑path detection; conflicting plugins are skipped with a warning.
 
 ## Paths and Resolution
 
 - Config dir precedence: `PEZ_CONFIG_DIR` → `__fish_config_dir` → `XDG_CONFIG_HOME/fish` → `~/.config/fish`.
 - Data dir precedence: `PEZ_DATA_DIR` → `__fish_user_data_dir/pez` → `XDG_DATA_HOME/fish/pez` → `~/.local/share/fish/pez`.
-- Copy destination: always the Fish config directory; overriding the target base via an env var is not supported.
+- Copy destination: defaults to the Fish config directory and can be overridden via `PEZ_TARGET_DIR` (or falls back to `__fish_config_dir` / `XDG_CONFIG_HOME/fish`).
 
 ## Upgrade Semantics
 
 - Local sources are skipped.
-- Non‑local plugins update to the latest commit on the remote default branch (remote HEAD).
-- Selectors in `pez.toml` (version/branch/tag/commit) are not used by `upgrade`; they are honored on fresh installs and on `install --force`.
+- If a selector is specified in `pez.toml` (`version`/`branch`/`tag`/`commit`), `upgrade` resolves against that selector.
+- When no selector is set, non‑local plugins update to the latest commit on the remote default branch (remote HEAD).

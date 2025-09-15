@@ -54,5 +54,5 @@ Key flag: `-v/--verbose` increases logging (`-vv` enables debug).
 
 ### Notes
 
-- Selectors (version/branch/tag/commit) are honored on fresh installs and on `install --force`; they are not applied by `upgrade`.
-- When installing explicit targets on the CLI, duplicate destination paths are skipped with a warning. When installing from `pez.toml` (no targets), existing files are overwritten.
+- Selectors (version/branch/tag/commit) are honored across installs and by `upgrade`. When no selector is set, `upgrade` updates to the latest commit on the remote default branch (remote HEAD).
+- Duplicate destination paths are detected for both CLI targets and installs from `pez.toml`. Conflicting plugins are skipped with a warning to avoid overwriting existing files.

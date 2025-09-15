@@ -4,7 +4,7 @@
 
 - Fish shell (for using the installed plugins)
 - Git (for cloning plugin repositories)
-- Rust toolchain (stable), Cargo available
+- Rust toolchain (stable) with Cargo
 
 ### Install
 

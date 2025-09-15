@@ -93,11 +93,11 @@ See the full command reference in [docs/commands.md](docs/commands.md).
 
 ## Configuration
 
-pez uses two main configuration files: `pez.toml` and `pez-lock.toml.`
+pez uses two main configuration files: `pez.toml` and `pez-lock.toml`.
 By default, these files are created in the fish configuration directory,
 but you can specify a different location using environment variables.
 
-Configuration File Locations
+Configuration file locations
 
 The configuration files are located based on the following priority:
 `$PEZ_CONFIG_DIR` > `$__fish_config_dir` > `$XDG_CONFIG_HOME/fish` > `~/.config/fish`
@@ -142,8 +142,10 @@ prioritized as follows:
 
 When you install a plugin, pez clones its repository into `pez_data_dir`.
 If the directory doesn’t exist, pez will create it.
-If the repository is already cloned, pez will notify you and skip cloning
-unless you use the --force option to re-clone it.
+If the repository is already cloned:
+
+- For explicit CLI targets (`pez install owner/repo ...`), pez logs a warning and skips cloning unless you pass `--force`.
+- For installs from `pez.toml` (`pez install` with no targets), pez returns an error for that plugin unless you pass `--force` to reinstall.
 
 After cloning, if the repository contains functions, completions, conf.d,
 or themes directories, pez will recursively copy files from these directories
@@ -161,9 +163,9 @@ conflicting plugin with a warning to avoid overwriting existing files.
 The destination fish configuration directory can be overridden using:
 `$PEZ_TARGET_DIR` > `$__fish_config_dir` > `$XDG_CONFIG_HOME/fish` > `~/.config/fish`
 
-Additionally, `pez-lock.toml` records information about the installed packages
+Additionally, `pez-lock.toml` records information about the installed plugins
 and the files copied. It is created in the same directory as `pez.toml`
-and will append information if it already exists.
+and is updated if it already exists.
 
 ### Concurrency
 
@@ -171,6 +173,11 @@ Control job parallelism with `PEZ_JOBS` (default: 4):
 
 - `install` (when CLI explicit targets are given): cloning is bounded by `PEZ_JOBS`
 - `upgrade` / `uninstall` / `prune` also honor `PEZ_JOBS`
+
+### Existing Clone Behavior
+
+- CLI explicit targets: skip with a warning unless `--force` (re‑clone).
+- From `pez.toml` (no targets): error unless `--force` (reinstall).
 
 ## Acknowledgements
 

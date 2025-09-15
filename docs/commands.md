@@ -19,8 +19,9 @@ Global options
   - CLI‑specified targets are appended to `pez.toml` (relative paths are normalized to absolute).
   - `owner/repo` resolves to `https://github.com/owner/repo`; `host/...` without a scheme is normalized to `https://host/...`.
   - Selectors: `@latest`, `@version:<v>`, `@branch:<b>`, `@tag:<t>`, `@commit:<sha>` influence the resolved commit for fresh installs and `install --force`.
-  - Duplicate files: pez maintains a set of destination paths encountered during the run and skips a plugin if copying would overwrite an existing file (applies to both CLI targets and `pez.toml`). A warning is printed and the plugin’s files are not recorded.
+  - Duplicate files: pez tracks destination paths seen during the run and skips a plugin if copying would overwrite an existing file (applies to both CLI targets and `pez.toml`). A warning is printed and the plugin’s files are not recorded.
   - Concurrency: with explicit targets, clones run concurrently (bounded by `PEZ_JOBS`) and file copies run sequentially with duplicate‑path detection; installs from `pez.toml` are processed sequentially with the same duplicate detection.
+  - Existing clones: when the repository directory already exists, CLI targets are skipped with a warning unless `--force` is provided; installs from `pez.toml` return an error for that plugin unless `--force` is provided.
 
 ## uninstall
 
@@ -28,7 +29,7 @@ Global options
 - Options:
   - `--force` Remove files recorded in the lockfile even if the repository directory is missing.
   - `--stdin` Read `owner/repo` list from stdin (ignores blank lines and lines starting with `#`).
-- Behavior: removes the cloned repository (if present) and files recorded in `pez-lock.toml`. Without `--force` when the repo directory is missing, the command prints the target files and aborts.
+- Behavior: removes the cloned repository (if present) and files recorded in `pez-lock.toml`. Without `--force` when the repo directory is missing, the command prints the target files and exits.
 - Example:
   - `printf "owner/a\nowner/b\n" | pez uninstall --stdin`
 
