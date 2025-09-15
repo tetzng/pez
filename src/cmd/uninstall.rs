@@ -138,3 +138,85 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config;
+    use crate::lock_file::{self, LockFile, PluginFile};
+    use crate::tests_support::env::TestEnvironmentSetup;
+
+    #[test]
+    fn test_uninstall_removes_repo_and_files_and_updates_lock_and_config() {
+        // Setup isolated test environment
+        let mut env = TestEnvironmentSetup::new();
+
+        // Ensure pez uses our isolated dirs
+        unsafe {
+            std::env::set_var("__fish_config_dir", &env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
+        }
+
+        // Create config with one plugin spec
+        let repo = PluginRepo {
+            owner: "owner".into(),
+            repo: "pkg".into(),
+        };
+        let spec = config::PluginSpec {
+            name: None,
+            source: config::PluginSource::Repo {
+                repo: repo.clone(),
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        env.setup_config(config::Config {
+            plugins: Some(vec![spec]),
+        });
+
+        // Create repo dir and a file record in lockfile that points to a functions file
+        env.setup_data_repo(vec![repo.clone()]);
+        let functions_dir = env.fish_config_dir.join(TargetDir::Functions.as_str());
+        std::fs::create_dir_all(&functions_dir).unwrap();
+        let dest_file = functions_dir.join("hello.fish");
+        std::fs::File::create(&dest_file).unwrap();
+
+        let plugin = crate::lock_file::Plugin {
+            name: "pkg".into(),
+            repo: repo.clone(),
+            source: format!("https://github.com/{}", repo.as_str()),
+            commit_sha: "abc1234".into(),
+            files: vec![PluginFile {
+                dir: TargetDir::Functions,
+                name: "hello.fish".into(),
+            }],
+        };
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![plugin],
+        });
+
+        // Act: uninstall with --force (true)
+        let res = uninstall(&repo, true);
+        assert!(res.is_ok());
+
+        // Assert: repo directory removed
+        assert!(std::fs::metadata(env.data_dir.join(repo.as_str())).is_err());
+        // Assert: destination file removed
+        assert!(std::fs::metadata(&dest_file).is_err());
+        // Assert: lock file updated (plugin removed)
+        let lock = lock_file::load(&env.lock_file_path).unwrap();
+        assert!(lock.plugins.is_empty());
+        // Assert: config updated (plugin spec removed)
+        let cfg = config::load(&env.config_path).unwrap();
+        assert!(
+            cfg.plugins
+                .unwrap()
+                .into_iter()
+                .all(|p| p.get_plugin_repo().unwrap() != repo)
+        );
+    }
+}

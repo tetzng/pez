@@ -534,4 +534,46 @@ mod tests {
                 .any(|f| f.dir == TargetDir::Functions && f.name == "nested/dir/sample.fish")
         );
     }
+
+    #[test]
+    fn test_copy_plugin_files_dedupe_skip_on_duplicate() {
+        let test_env = TestEnvironmentSetup::new();
+        let mut test_data = TestDataBuilder::new().build();
+
+        // Arrange: create a repo with one function file
+        let plugin_files = vec![PluginFile {
+            dir: TargetDir::Functions,
+            name: "sample.fish".to_string(),
+        }];
+        let repo = test_data.plugin_spec.get_plugin_repo().unwrap();
+        std::fs::create_dir_all(test_env.data_dir.join(repo.as_str())).unwrap();
+        test_env.add_plugin_files_to_repo(&repo, &plugin_files);
+
+        // Pre-create the destination path and mark it as already occupied in dedupe set
+        let dest_dir = test_env.fish_config_dir.join(TargetDir::Functions.as_str());
+        std::fs::create_dir_all(&dest_dir).unwrap();
+        let existing_dest = dest_dir.join("sample.fish");
+        std::fs::File::create(&existing_dest).unwrap();
+
+        let mut dedupe = std::collections::HashSet::new();
+        dedupe.insert(existing_dest.clone());
+
+        // Act: copy with dedupe and skip_on_duplicate = true
+        let repo_path = test_env.data_dir.join(repo.as_str());
+        let outcome = copy_plugin_files(
+            &repo_path,
+            &test_env.fish_config_dir,
+            &mut test_data.plugin,
+            Some(&mut dedupe),
+            true,
+        )
+        .expect("copy should not error");
+
+        // Assert: skip flagged, no files recorded/copied beyond pre-existing
+        assert!(outcome.skipped_due_to_duplicate);
+        assert_eq!(outcome.file_count, 0);
+        assert!(test_data.plugin.files.is_empty());
+        // Pre-existing file remains
+        assert!(std::fs::metadata(&existing_dest).is_ok());
+    }
 }
