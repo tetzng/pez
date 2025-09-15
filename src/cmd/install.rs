@@ -599,18 +599,18 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 emit_event(&plugin, &utils::Event::Uninstall)?;
 
                 let fish_config_dir = utils::load_fish_config_dir()?;
-                plugin.files.iter().for_each(|file| {
+                for file in &plugin.files {
                     let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
                     if dest_path.exists()
                         && let Err(e) = fs::remove_file(&dest_path)
                     {
                         warn!("Failed to remove {}: {:?}", dest_path.display(), e);
                     }
-                    lock_file.remove_plugin(&plugin.source);
-                    if let Err(e) = lock_file.save(&lock_file_path) {
-                        warn!("Failed to save lock file: {:?}", e);
-                    }
-                });
+                }
+                lock_file.remove_plugin(&plugin.source);
+                if let Err(e) = lock_file.save(&lock_file_path) {
+                    warn!("Failed to save lock file: {:?}", e);
+                }
             }
         } else {
             info!("\nNotice: The following plugins are in pez-lock.toml but not in pez.toml:");
