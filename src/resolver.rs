@@ -1,4 +1,4 @@
-use crate::{config::PluginSource, git::Selection};
+use crate::config::PluginSource;
 
 use crate::cli::PluginRepo;
 
@@ -10,6 +10,16 @@ pub(crate) enum RefKind {
     Tag(String),
     Branch(String),
     Commit(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Selection {
+    DefaultHead,
+    Latest,
+    Branch(String),
+    Tag(String),
+    Commit(String),
+    Version(String),
 }
 
 pub(crate) fn parse_ref_kind(s: &str) -> RefKind {
@@ -139,7 +149,6 @@ pub(crate) fn ref_kind_to_url_source(url: &str, kind: &RefKind) -> PluginSource 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::git;
 
     #[test]
     fn parses_ref_kinds() {
@@ -155,27 +164,27 @@ mod tests {
     fn maps_to_selection() {
         let sel = selection_from_ref_kind(&RefKind::Latest);
         match sel {
-            git::Selection::Latest => {}
+            Selection::Latest => {}
             _ => panic!(),
         }
         let sel = selection_from_ref_kind(&RefKind::Branch("main".into()));
         match sel {
-            git::Selection::Branch(b) => assert_eq!(b, "main"),
+            Selection::Branch(b) => assert_eq!(b, "main"),
             _ => panic!(),
         }
         let sel = selection_from_ref_kind(&RefKind::Tag("v1".into()));
         match sel {
-            git::Selection::Tag(t) => assert_eq!(t, "v1"),
+            Selection::Tag(t) => assert_eq!(t, "v1"),
             _ => panic!(),
         }
         let sel = selection_from_ref_kind(&RefKind::Commit("abc".into()));
         match sel {
-            git::Selection::Commit(c) => assert_eq!(c, "abc"),
+            Selection::Commit(c) => assert_eq!(c, "abc"),
             _ => panic!(),
         }
         let sel = selection_from_ref_kind(&RefKind::Version("v3".into()));
         match sel {
-            git::Selection::Version(v) => assert_eq!(v, "v3"),
+            Selection::Version(v) => assert_eq!(v, "v3"),
             _ => panic!(),
         }
     }
