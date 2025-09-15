@@ -93,10 +93,13 @@ fn upgrade(plugin: &PluginRepo) -> anyhow::Result<()> {
 async fn upgrade_all() -> anyhow::Result<()> {
     let (config, _) = utils::load_or_create_config()?;
     if let Some(plugins) = &config.plugins {
+        let repos: Vec<PluginRepo> = plugins
+            .iter()
+            .filter_map(|p| p.get_plugin_repo().ok())
+            .collect();
         let jobs = utils::load_jobs();
-        let tasks = stream::iter(plugins.iter())
-            .map(|plugin_spec| {
-                let repo = plugin_spec.get_plugin_repo().unwrap();
+        let tasks = stream::iter(repos.into_iter())
+            .map(|repo| {
                 tokio::task::spawn_blocking(move || {
                     info!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &repo);
                     upgrade_plugin(&repo)
@@ -145,8 +148,10 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
 
                 lock_file_plugin.files.iter().for_each(|file| {
                     let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
-                    if dest_path.exists() {
-                        fs::remove_file(&dest_path).unwrap();
+                    if dest_path.exists()
+                        && let Err(e) = fs::remove_file(&dest_path)
+                    {
+                        warn!("Failed to remove {}: {:?}", dest_path.display(), e);
                     }
                 });
                 let mut updated_plugin = Plugin {

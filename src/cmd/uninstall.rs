@@ -109,7 +109,9 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 if dest_path.exists() {
                     let path_display = dest_path.display();
                     info!("   - {}", path_display);
-                    fs::remove_file(&dest_path).unwrap();
+                    if let Err(e) = fs::remove_file(&dest_path) {
+                        warn!("Failed to remove {}: {:?}", path_display, e);
+                    }
                 }
             });
             lock_file.remove_plugin(&locked.source);

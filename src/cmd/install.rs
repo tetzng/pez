@@ -287,7 +287,13 @@ async fn clone_plugins(
                                     "Failed to resolve selection: {:?}. Falling back to HEAD.",
                                     e
                                 );
-                                git::get_latest_commit_sha(repo).unwrap()
+                                match git::get_latest_commit_sha(repo) {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        warn!("Failed to read HEAD commit: {:?}", e);
+                                        return;
+                                    }
+                                }
                             }
                         };
                         Plugin {
@@ -310,7 +316,7 @@ async fn clone_plugins(
 
     match new_lock_plugins_result {
         result::Result::Ok(new_lock_plugins) => Ok(new_lock_plugins.into_inner()),
-        Err(_) => panic!("Failed to unwrap new_lock_plugins"),
+        Err(_) => anyhow::bail!("Internal error: pending references to new_lock_plugins remain"),
     }
 }
 
