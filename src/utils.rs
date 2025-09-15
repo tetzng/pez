@@ -18,6 +18,9 @@ fn home_dir() -> anyhow::Result<path::PathBuf> {
 }
 
 pub(crate) fn load_fish_config_dir() -> anyhow::Result<path::PathBuf> {
+    if let Some(dir) = env::var_os("PEZ_TARGET_DIR") {
+        return Ok(path::PathBuf::from(dir));
+    }
     if let Some(dir) = env::var_os("__fish_config_dir") {
         return Ok(path::PathBuf::from(dir));
     }
