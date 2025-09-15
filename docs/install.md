@@ -20,6 +20,21 @@ From source (this repo):
 cargo install --path .
 ```
 
+From GitHub Releases (prebuilt binary, when available):
+
+```shell
+# Visit the Releases page and download the asset for your platform.
+# Example (Linux x86_64):
+curl -fsSL -o pez https://github.com/<owner>/<repo>/releases/download/<tag>/pez-<tag>-linux-amd64
+chmod +x pez
+./pez -V
+```
+
+Notes
+
+- On tagged releases (`v*.*.*`), CI builds, tests, and uploads release artifacts.
+- Asset filenames vary by platform; check the release page for the exact names.
+
 ### Build from source
 
 ```shell
