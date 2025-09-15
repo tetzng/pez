@@ -11,6 +11,7 @@ struct PluginRow {
     name: String,
     repo: String,
     source: String,
+    selector: String,
     commit: String,
 }
 
@@ -30,6 +31,7 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let config_opt = utils::load_config().ok().map(|(c, _)| c);
     let (lock_file, _) = match result {
         Ok(v) => v,
         Err(_) => {
@@ -37,7 +39,15 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
             return Ok(());
         }
     };
-    let plugins = &lock_file.plugins;
+    let mut plugins = lock_file.plugins.clone();
+    if let Some(filter) = &args.filter {
+        match filter {
+            cli::ListFilter::All => {}
+            cli::ListFilter::Local => plugins.retain(|p| git::is_local_source(&p.source)),
+            cli::ListFilter::Remote => plugins.retain(|p| !git::is_local_source(&p.source)),
+        }
+    }
+    let plugins = &plugins;
     if plugins.is_empty() {
         info!("No plugins installed!");
         return Ok(());
@@ -51,8 +61,8 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
         }
     } else {
         match args.format.clone().unwrap_or(cli::ListFormat::Plain) {
-            cli::ListFormat::Table => display_plugins_in_table(plugins),
-            cli::ListFormat::Json => list_json(plugins)?,
+            cli::ListFormat::Table => display_plugins_in_table(plugins, config_opt.as_ref()),
+            cli::ListFormat::Json => list_json(plugins, config_opt.as_ref())?,
             cli::ListFormat::Plain => list(plugins)?,
         }
     }
@@ -73,9 +83,56 @@ fn display_plugins<W: io::Write>(plugins: &[Plugin], mut writer: W) -> anyhow::R
     Ok(())
 }
 
-fn display_plugins_in_table(plugins: &[Plugin]) {
+fn display_plugins_in_table(plugins: &[Plugin], config: Option<&crate::config::Config>) {
     fn short7(s: &str) -> String {
         s.chars().take(7).collect()
+    }
+    fn selector_of(
+        cfg: Option<&crate::config::Config>,
+        repo: &crate::models::PluginRepo,
+    ) -> String {
+        let cfg = match cfg {
+            Some(c) => c,
+            None => return "-".into(),
+        };
+        let spec = match cfg.plugins.as_ref().and_then(|ps| {
+            ps.iter()
+                .find(|p| p.get_plugin_repo().ok().as_ref() == Some(repo))
+        }) {
+            Some(s) => s,
+            None => return "-".into(),
+        };
+        match &spec.source {
+            crate::config::PluginSource::Repo {
+                version,
+                branch,
+                tag,
+                commit,
+                ..
+            }
+            | crate::config::PluginSource::Url {
+                version,
+                branch,
+                tag,
+                commit,
+                ..
+            } => {
+                if let Some(c) = commit {
+                    return format!("commit:{}", c);
+                }
+                if let Some(b) = branch {
+                    return format!("branch:{}", b);
+                }
+                if let Some(t) = tag {
+                    return format!("tag:{}", t);
+                }
+                if let Some(v) = version {
+                    return format!("version:{}", v);
+                }
+                "-".into()
+            }
+            crate::config::PluginSource::Path { .. } => "local".into(),
+        }
     }
     let plugin_rows = plugins
         .iter()
@@ -83,6 +140,7 @@ fn display_plugins_in_table(plugins: &[Plugin]) {
             name: p.get_name(),
             repo: p.repo.as_str().clone(),
             source: p.source.clone(),
+            selector: selector_of(config, &p.repo),
             commit: short7(&p.commit_sha),
         })
         .collect::<Vec<PluginRow>>();
@@ -158,7 +216,48 @@ fn list_outdated_table(plugins: &[Plugin]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn list_json(plugins: &[Plugin]) -> anyhow::Result<()> {
+fn list_json(plugins: &[Plugin], config: Option<&crate::config::Config>) -> anyhow::Result<()> {
+    fn selector_of(
+        cfg: Option<&crate::config::Config>,
+        repo: &crate::models::PluginRepo,
+    ) -> Option<String> {
+        let cfg = cfg?;
+        let spec = cfg.plugins.as_ref().and_then(|ps| {
+            ps.iter()
+                .find(|p| p.get_plugin_repo().ok().as_ref() == Some(repo))
+        })?;
+        match &spec.source {
+            crate::config::PluginSource::Repo {
+                version,
+                branch,
+                tag,
+                commit,
+                ..
+            }
+            | crate::config::PluginSource::Url {
+                version,
+                branch,
+                tag,
+                commit,
+                ..
+            } => {
+                if let Some(c) = commit {
+                    return Some(format!("commit:{}", c));
+                }
+                if let Some(b) = branch {
+                    return Some(format!("branch:{}", b));
+                }
+                if let Some(t) = tag {
+                    return Some(format!("tag:{}", t));
+                }
+                if let Some(v) = version {
+                    return Some(format!("version:{}", v));
+                }
+                None
+            }
+            crate::config::PluginSource::Path { .. } => Some("local".into()),
+        }
+    }
     let value = json!(
         plugins
             .iter()
@@ -166,6 +265,7 @@ fn list_json(plugins: &[Plugin]) -> anyhow::Result<()> {
                 "name": p.get_name(),
                 "repo": p.repo.as_str(),
                 "source": p.source,
+                "selector": selector_of(config, &p.repo),
                 "commit": p.commit_sha,
             }))
             .collect::<Vec<_>>()

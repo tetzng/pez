@@ -86,6 +86,10 @@ pub(crate) struct ListArgs {
     /// Show only outdated plugins
     #[arg(long)]
     pub(crate) outdated: bool,
+
+    /// Filter plugins by source kind
+    #[arg(long, value_enum)]
+    pub(crate) filter: Option<ListFilter>,
 }
 
 #[derive(Args, Debug)]
@@ -108,6 +112,13 @@ pub(crate) enum ListFormat {
     Plain,
     Table,
     Json,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub(crate) enum ListFilter {
+    All,
+    Local,
+    Remote,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
