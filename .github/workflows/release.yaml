@@ -1,0 +1,32 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Cargo fmt
+        run: cargo fmt --all -- --check
+      - name: Cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Cargo test
+        run: cargo test --all-features
+      - name: Build release binaries
+        run: |
+          cargo build --release
+          mkdir -p dist
+          cp target/release/pez dist/pez-$GITHUB_REF_NAME-linux-amd64
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pez-$GITHUB_REF_NAME
+          path: dist/*
