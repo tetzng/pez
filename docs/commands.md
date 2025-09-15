@@ -20,7 +20,7 @@ Global options
   - `owner/repo` resolves to `https://github.com/owner/repo`; `host/...` without a scheme is normalized to `https://host/...`.
   - Selectors: `@latest`, `@version:<v>`, `@branch:<b>`, `@tag:<t>`, `@commit:<sha>` influence the resolved commit for fresh installs and `install --force`.
   - Duplicate files: pez maintains a set of destination paths encountered during the run and skips a plugin if copying would overwrite an existing file (applies to both CLI targets and `pez.toml`). A warning is printed and the plugin’s files are not recorded.
-  - Concurrency: with explicit targets, clones run concurrently (bounded by `PEZ_JOBS`) and file copies run sequentially with duplicate‑path detection; installs from `pez.toml` are processed sequentially（同じ重複検出あり）。
+  - Concurrency: with explicit targets, clones run concurrently (bounded by `PEZ_JOBS`) and file copies run sequentially with duplicate‑path detection; installs from `pez.toml` are processed sequentially with the same duplicate detection.
 
 ## uninstall
 
@@ -30,18 +30,22 @@ Global options
 
 ## upgrade
 
-- 指定したプラグイン（`owner/repo ...`）を更新。引数なしの場合は `pez.toml` に記載されたプラグインを更新。
-- `pez.toml` のセレクタ（`version`/`branch`/`tag`/`commit`）を尊重して解決します。セレクタが未指定のときは、リモートのデフォルトブランチ（remote HEAD）の最新コミットに更新します。
-- ローカルソース（`path`）はスキップします。
-- 並列数は `PEZ_JOBS` で制御します。
+- Upgrade specified plugins (`owner/repo ...`), or with no arguments, upgrade plugins listed in `pez.toml`.
+- Respects selectors in `pez.toml` (`version`/`branch`/`tag`/`commit`). When no selector is set, updates to the latest commit on the remote default branch (remote HEAD).
+- Local path sources (`path`) are skipped.
+- Concurrency is controlled by `PEZ_JOBS`.
 
 ## list
 
-- Show installed plugins from `pez-lock.toml`.
-- Options: `--format [plain|table|json]`, `--outdated`.
-- JSON fields:
-  - `list`: `name`, `repo`, `source`, `commit`
-  - `list --outdated`: `name`, `repo`, `source`, `current`, `latest`
+- Show installed plugins recorded in `pez-lock.toml`.
+- Options:
+  - `--format [plain|table|json]`
+  - `--outdated`
+  - `--filter [all|local|remote]`
+- Fields:
+  - table: `name`, `repo`, `source`, `selector`, `commit`
+  - json: `name`, `repo`, `source`, `selector`, `commit`
+  - `list --outdated` (json/table): `name`, `repo`, `source`, `current`, `latest`
 
 ## prune
 
