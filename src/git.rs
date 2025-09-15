@@ -402,4 +402,61 @@ mod tests {
         // Should prefer highest among 1.x.y (either with or without v prefix)
         assert!(sel == "1.3.0" || sel == "v1.4.5");
     }
+
+    #[test]
+    fn get_latest_remote_commit_from_local_remote_repo() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        // Setup temporary directories
+        let tmp = tempdir().unwrap();
+        let origin_path = tmp.path().join("origin.git");
+        let workdir_path = tmp.path().join("work");
+        let clone_path = tmp.path().join("clone");
+
+        // Initialize bare origin and a working repo
+        let origin = git2::Repository::init_bare(&origin_path).unwrap();
+        let work = git2::Repository::init(&workdir_path).unwrap();
+
+        // Configure identity for committing
+        {
+            let mut cfg = work.config().unwrap();
+            cfg.set_str("user.name", "tester").unwrap();
+            cfg.set_str("user.email", "tester@example.com").unwrap();
+        }
+
+        // Create initial commit on main
+        fs::create_dir_all(&workdir_path).unwrap();
+        fs::write(workdir_path.join("README.md"), "hello").unwrap();
+
+        let mut index = work.index().unwrap();
+        index.add_path(std::path::Path::new("README.md")).unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = work.find_tree(tree_oid).unwrap();
+        let sig = work.signature().unwrap();
+        let commit_oid = work
+            .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        // Add origin and push main
+        work.remote("origin", origin_path.to_str().unwrap())
+            .unwrap();
+        {
+            let mut remote = work.find_remote("origin").unwrap();
+            remote
+                .connect(git2::Direction::Push)
+                .and_then(|_| remote.push(&["refs/heads/main:refs/heads/main"], None))
+                .unwrap();
+        }
+
+        // Set default branch on origin to refs/heads/main
+        origin.set_head("refs/heads/main").unwrap();
+
+        // Clone into consumer repo using our clone logic
+        let clone = clone_repository(origin_path.to_str().unwrap(), &clone_path).unwrap();
+
+        // get_latest_remote_commit should resolve to the pushed commit
+        let latest = get_latest_remote_commit(&clone).unwrap();
+        assert_eq!(latest, commit_oid.to_string());
+    }
 }
