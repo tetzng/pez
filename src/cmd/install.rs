@@ -10,7 +10,7 @@ use crate::{
 };
 
 use console::Emoji;
-use futures::future;
+use futures::{StreamExt, stream};
 use std::{fs, path, result, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
@@ -157,15 +157,13 @@ async fn clone_plugins(
     let lock_file = Arc::new(Mutex::new(lock_file));
     let new_lock_plugins: Arc<Mutex<Vec<Plugin>>> = Arc::new(Mutex::new(vec![]));
 
-    let clone_tasks: Vec<_> = resolved_targets
-        .iter()
-        .cloned()
-        .map(|resolved| {
+    let jobs = utils::load_jobs();
+    stream::iter(resolved_targets.iter().cloned())
+        .for_each_concurrent(jobs, |resolved| {
             let new_lock_plugins = Arc::clone(&new_lock_plugins);
             let lock_file = Arc::clone(&lock_file);
             let pez_data_dir = pez_data_dir.to_path_buf();
-
-            tokio::spawn(async move {
+            async move {
                 let plugin_repo = resolved.plugin_repo.clone();
                 let plugin_repo_str = plugin_repo.as_str();
                 let repo_path = pez_data_dir.join(&plugin_repo_str);
@@ -306,11 +304,9 @@ async fn clone_plugins(
                     }
                 };
                 new_lock_plugins.lock().await.push(new_plugin);
-            })
+            }
         })
-        .collect();
-
-    future::join_all(clone_tasks).await;
+        .await;
 
     let new_lock_plugins_result = Arc::try_unwrap(new_lock_plugins);
 
