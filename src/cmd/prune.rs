@@ -152,7 +152,9 @@ where
             if dest_path.exists() {
                 let path_display = dest_path.display();
                 info!("   - {}", path_display);
-                fs::remove_file(&dest_path).unwrap();
+                if let Err(e) = fs::remove_file(&dest_path) {
+                    warn!("Failed to remove {}: {:?}", path_display, e);
+                }
             }
         });
         ctx.lock_file.remove_plugin(&plugin.source);
@@ -206,9 +208,7 @@ async fn prune_parallel(force: bool, yes: bool, ctx: &mut PruneContext<'_>) -> a
             async move {
                 let repo_path = data_dir.join(plugin.repo.as_str());
                 if repo_path.exists() {
-                    tokio::task::spawn_blocking(move || fs::remove_dir_all(&repo_path))
-                        .await
-                        .unwrap()?;
+                    tokio::task::spawn_blocking(move || fs::remove_dir_all(&repo_path)).await??;
                 } else {
                     let path_display = repo_path.display();
                     warn!(
@@ -239,10 +239,10 @@ async fn prune_parallel(force: bool, yes: bool, ctx: &mut PruneContext<'_>) -> a
                     let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
                     if dest_path.exists() {
                         let to_delete = dest_path.clone();
-                        tokio::task::spawn_blocking(move || fs::remove_file(&to_delete))
+                        let _ = tokio::task::spawn_blocking(move || fs::remove_file(&to_delete))
                             .await
-                            .unwrap()
-                            .ok();
+                            .map_err(|e| anyhow::anyhow!(e))
+                            .and_then(|res| res.map_err(|e| anyhow::anyhow!(e)));
                     }
                 }
 
