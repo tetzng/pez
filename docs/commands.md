@@ -23,7 +23,7 @@ Global options
   - Selectors: `@latest`, `@version:<v>`, `@branch:<b>`, `@tag:<t>`, `@commit:<sha>` influence the resolved commit for fresh installs and `install --force`.
   - Duplicate files: pez tracks destination paths seen during the run and skips a plugin if copying would overwrite an existing file (applies to both CLI targets and `pez.toml`). A warning is printed and the plugin’s files are not recorded.
   - Concurrency: with explicit targets, clones run concurrently (bounded by `PEZ_JOBS`) and file copies run sequentially with duplicate‑path detection; installs from `pez.toml` are processed sequentially with the same duplicate detection.
-  - Existing clones: CLI targets are skipped with a warning unless you pass `--force`. When running from `pez.toml`, entries that already exist in `pez-lock.toml` and on disk are treated as up to date and skipped unless you pass `--force`. If a clone exists without a matching lockfile entry, pez returns an error unless you pass `--force`.
+  - Existing clones: CLI targets are skipped with a warning unless you pass `--force`, which removes the cached clone before re-cloning. When running from `pez.toml`, entries that already exist in `pez-lock.toml` and on disk are treated as up to date and skipped unless you pass `--force`; when `--force` is present, pez deletes the cached clone before re-cloning so config-driven installs behave the same as explicit targets. If a clone exists without a matching lockfile entry, pez returns an error unless you pass `--force`.
   - With `--prune`, pez behaves as though `pez prune` were run immediately after the install, removing lockfile entries that are no longer declared in `pez.toml`.
 
 ## uninstall
