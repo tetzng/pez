@@ -17,10 +17,7 @@ fn home_dir() -> anyhow::Result<path::PathBuf> {
     Err(anyhow::anyhow!("Could not determine home directory"))
 }
 
-pub(crate) fn load_fish_config_dir() -> anyhow::Result<path::PathBuf> {
-    if let Some(dir) = env::var_os("PEZ_TARGET_DIR") {
-        return Ok(path::PathBuf::from(dir));
-    }
+fn load_default_fish_config_dir() -> anyhow::Result<path::PathBuf> {
     if let Some(dir) = env::var_os("__fish_config_dir") {
         return Ok(path::PathBuf::from(dir));
     }
@@ -33,12 +30,24 @@ pub(crate) fn load_fish_config_dir() -> anyhow::Result<path::PathBuf> {
     Ok(home.join(".config").join("fish"))
 }
 
-pub(crate) fn load_pez_config_dir() -> anyhow::Result<path::PathBuf> {
+fn load_base_config_dir() -> anyhow::Result<path::PathBuf> {
     if let Some(dir) = env::var_os("PEZ_CONFIG_DIR") {
         return Ok(path::PathBuf::from(dir));
     }
 
-    load_fish_config_dir()
+    load_default_fish_config_dir()
+}
+
+pub(crate) fn load_fish_config_dir() -> anyhow::Result<path::PathBuf> {
+    if let Some(dir) = env::var_os("PEZ_TARGET_DIR") {
+        return Ok(path::PathBuf::from(dir));
+    }
+
+    load_default_fish_config_dir()
+}
+
+pub(crate) fn load_pez_config_dir() -> anyhow::Result<path::PathBuf> {
+    load_base_config_dir()
 }
 
 pub(crate) fn load_lock_file_dir() -> anyhow::Result<path::PathBuf> {
@@ -397,6 +406,117 @@ mod tests {
     use crate::models::PluginRepo;
     use crate::models::TargetDir;
     use crate::tests_support::env::TestEnvironmentSetup;
+    use std::ffi::OsString;
+
+    struct EnvGuard {
+        vars: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn capture(keys: &[&'static str]) -> Self {
+            let vars = keys
+                .iter()
+                .map(|&key| (key, std::env::var_os(key)))
+                .collect();
+            Self { vars }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in &self.vars {
+                match value {
+                    Some(val) => unsafe { std::env::set_var(key, val.clone()) },
+                    None => unsafe { std::env::remove_var(key) },
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn load_pez_config_dir_prefers_config_dir_over_target_dir() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "HOME",
+        ]);
+
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().join("config");
+        let target_dir = temp.path().join("target");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        unsafe {
+            std::env::set_var("PEZ_CONFIG_DIR", &config_dir);
+            std::env::set_var("PEZ_TARGET_DIR", &target_dir);
+            std::env::remove_var("__fish_config_dir");
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let resolved = load_pez_config_dir().expect("config dir should resolve");
+        assert_eq!(resolved, config_dir);
+    }
+
+    #[test]
+    fn load_pez_config_dir_ignores_target_dir_when_unset() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "HOME",
+        ]);
+
+        let temp = tempfile::tempdir().unwrap();
+        let fish_config_dir = temp.path().join("fish_config");
+        let target_dir = temp.path().join("target");
+        std::fs::create_dir_all(&fish_config_dir).unwrap();
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        unsafe {
+            std::env::remove_var("PEZ_CONFIG_DIR");
+            std::env::set_var("PEZ_TARGET_DIR", &target_dir);
+            std::env::set_var("__fish_config_dir", &fish_config_dir);
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let resolved = load_pez_config_dir().expect("config dir should resolve");
+        assert_eq!(resolved, fish_config_dir);
+    }
+
+    #[test]
+    fn load_fish_config_dir_honors_target_dir() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "HOME",
+        ]);
+
+        let temp = tempfile::tempdir().unwrap();
+        let target_dir = temp.path().join("target");
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        unsafe {
+            std::env::remove_var("PEZ_CONFIG_DIR");
+            std::env::set_var("PEZ_TARGET_DIR", &target_dir);
+            std::env::remove_var("__fish_config_dir");
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let resolved = load_fish_config_dir().expect("fish config dir should resolve");
+        assert_eq!(resolved, target_dir);
+    }
 
     struct TestDataBuilder {
         plugin: Plugin,

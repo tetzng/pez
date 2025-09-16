@@ -99,8 +99,13 @@ but you can specify a different location using environment variables.
 
 Configuration file locations
 
-The configuration files are located based on the following priority:
-`$PEZ_CONFIG_DIR` > `$__fish_config_dir` > `$XDG_CONFIG_HOME/fish` > `~/.config/fish`
+pez looks for `pez.toml` and `pez-lock.toml` in the following order:
+`$PEZ_CONFIG_DIR` > `$__fish_config_dir` > `$XDG_CONFIG_HOME/fish` > `~/.config/fish`.
+
+`PEZ_TARGET_DIR` only affects where plugin files are copied. If you previously relied on
+`PEZ_TARGET_DIR` to relocate your configuration files, move `pez.toml` and
+`pez-lock.toml` into the directory referenced by `PEZ_CONFIG_DIR` (or set
+`PEZ_CONFIG_DIR` to that path) before running newer versions of pez.
 
 ### pez.toml (Schema)
 
@@ -144,8 +149,8 @@ When you install a plugin, pez clones its repository into `pez_data_dir`.
 If the directory doesn’t exist, pez will create it.
 If the repository is already cloned:
 
-- For explicit CLI targets (`pez install owner/repo ...`), pez logs a warning and skips cloning unless you pass `--force`.
-- For installs from `pez.toml` (`pez install` with no targets), pez returns an error for that plugin unless you pass `--force` to reinstall.
+- For explicit CLI targets (`pez install owner/repo ...`), pez logs a warning and skips the reinstall unless you pass `--force`.
+- For installs driven by `pez.toml` (`pez install` with no targets), entries that already exist in `pez-lock.toml` and on disk are treated as up to date and skipped unless you pass `--force`. If a clone exists without a matching lockfile entry, pez returns an error unless you pass `--force`.
 
 After cloning, if the repository contains functions, completions, conf.d,
 or themes directories, pez will recursively copy files from these directories
@@ -160,8 +165,9 @@ When installing plugins (either from pez.toml or explicit targets), pez detects
 duplicate destination paths across all plugins in the same run and skips the
 conflicting plugin with a warning to avoid overwriting existing files.
 
-The destination fish configuration directory can be overridden using:
-`$PEZ_TARGET_DIR` > `$__fish_config_dir` > `$XDG_CONFIG_HOME/fish` > `~/.config/fish`
+The destination fish configuration directory can be overridden using
+`PEZ_TARGET_DIR`; when it is unset, pez falls back to
+`$__fish_config_dir` > `$XDG_CONFIG_HOME/fish` > `~/.config/fish`.
 
 Additionally, `pez-lock.toml` records information about the installed plugins
 and the files copied. It is created in the same directory as `pez.toml`
@@ -177,7 +183,7 @@ Control job parallelism with `PEZ_JOBS` (default: 4):
 ### Existing Clone Behavior
 
 - CLI explicit targets: skip with a warning unless `--force` (re‑clone).
-- From `pez.toml` (no targets): error unless `--force` (reinstall).
+- From `pez.toml` (no targets): entries already tracked in `pez-lock.toml` with an existing clone are skipped unless you pass `--force`. If a clone exists without a matching lockfile entry, pez returns an error unless you pass `--force`.
 
 ## Acknowledgements
 
