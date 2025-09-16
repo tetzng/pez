@@ -14,21 +14,24 @@ Global options
 
 - Install from CLI targets or from `pez.toml` (when no targets are given).
 - Targets: `owner/repo[@ref]`, `host/owner/repo[@ref]`, full URL, absolute/`~/` paths.
-- Options: `--force`, `--prune` (remove lockfile entries not present in `pez.toml`).
+- Options:
+  - `--force` Reinstall even if the target already exists.
+  - `--prune` (only available when running without explicit targets) removes lockfile entries that are no longer declared in `pez.toml` after a successful install.
 - Behavior:
-  - CLI‑specified targets are appended to `pez.toml` (relative paths are normalized to absolute).
+  - CLI‑specified targets are appended to `pez.toml`; relative paths are normalized to absolute paths before writing.
   - `owner/repo` resolves to `https://github.com/owner/repo`; `host/...` without a scheme is normalized to `https://host/...`.
   - Selectors: `@latest`, `@version:<v>`, `@branch:<b>`, `@tag:<t>`, `@commit:<sha>` influence the resolved commit for fresh installs and `install --force`.
   - Duplicate files: pez tracks destination paths seen during the run and skips a plugin if copying would overwrite an existing file (applies to both CLI targets and `pez.toml`). A warning is printed and the plugin’s files are not recorded.
   - Concurrency: with explicit targets, clones run concurrently (bounded by `PEZ_JOBS`) and file copies run sequentially with duplicate‑path detection; installs from `pez.toml` are processed sequentially with the same duplicate detection.
-  - Existing clones: when the repository directory already exists, CLI targets are skipped with a warning unless `--force` is provided; installs from `pez.toml` return an error for that plugin unless `--force` is provided.
+  - Existing clones: CLI targets are skipped with a warning unless you pass `--force`. When running from `pez.toml`, entries that already exist in `pez-lock.toml` and on disk are treated as up to date and skipped unless you pass `--force`. If a clone exists without a matching lockfile entry, pez returns an error unless you pass `--force`.
+  - With `--prune`, pez behaves as though `pez prune` were run immediately after the install, removing lockfile entries that are no longer declared in `pez.toml`.
 
 ## uninstall
 
 - Remove the specified plugins (`owner/repo`). With `--stdin`, also read plugin repos from standard input (one per line).
 - Options:
   - `--force` Remove files recorded in the lockfile even if the repository directory is missing.
-  - `--stdin` Read `owner/repo` list from stdin (ignores blank lines and lines starting with `#`).
+  - `--stdin` Read `owner/repo` values from stdin. Blank lines and lines starting with `#` are ignored; the remaining entries are sorted and deduplicated before processing.
 - Behavior: removes the cloned repository (if present) and files recorded in `pez-lock.toml`. Without `--force` when the repo directory is missing, the command prints the target files and exits.
 - Example:
   - `printf "owner/a\nowner/b\n" | pez uninstall --stdin`
@@ -39,6 +42,7 @@ Global options
 - Respects selectors in `pez.toml` (`version`/`branch`/`tag`/`commit`). When no selector is set, updates to the latest commit on the remote default branch (remote HEAD).
 - Local path sources (`path`) are skipped.
 - Concurrency is controlled by `PEZ_JOBS`.
+- Any repo specified on the CLI that is not already in `pez.toml` is added automatically so future installs remain in sync.
 
 ## list
 
@@ -47,6 +51,7 @@ Global options
   - `--format [plain|table|json]`
   - `--outdated`
   - `--filter [all|local|remote]`
+- Filtering is based on the plugin source: `local` shows only path-based installs, `remote` keeps Git-backed sources.
 - Fields:
   - table: `name`, `repo`, `source`, `selector`, `commit`
   - json: `name`, `repo`, `source`, `selector`, `commit`
@@ -71,4 +76,7 @@ Global options
 ## migrate
 
 - Import from fisher’s `fish_plugins` into `pez.toml`.
-- Options: `--dry-run`, `--force`, `--install`.
+- By default the command merges new repos into the existing `pez.toml`, skipping duplicates, ignoring comments/blank lines, and omitting the `jorgebucaran/fisher` entry itself.
+- `--dry-run` prints the planned additions without modifying any files.
+- `--force` replaces the existing plugin list with the migrated entries instead of merging.
+- `--install` triggers `pez install` for the migrated entries after they are written (skipped when `--dry-run` is set).

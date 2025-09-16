@@ -19,7 +19,7 @@ This document outlines the high‑level structure and flows in pez.
 1. Normalize CLI targets (or entries in `pez.toml`) into `InstallTarget` values.
 2. Convert each `InstallTarget` to a `ResolvedInstallTarget` (source, ref_kind, is_local).
 3. Clone remote sources; skip clone for local paths.
-4. Resolve the commit using `resolver::RefKind` → `git::resolve_selection`.
+4. Resolve the commit using `resolver::RefKind` -> `git::resolve_selection`.
 5. Copy files to the Fish config directory using `utils::copy_plugin_files*`.
 6. Update the lockfile with `name`/`repo`/`source`/`commit_sha`/`files`.
 7. For files under `conf.d`, emit `fish -c 'emit <stem>_{install|update|uninstall}'` events.
@@ -33,8 +33,9 @@ This document outlines the high‑level structure and flows in pez.
 
 ## Paths and Resolution
 
-- Config dir precedence: `PEZ_CONFIG_DIR` → `__fish_config_dir` → `XDG_CONFIG_HOME/fish` → `~/.config/fish`.
-- Data dir precedence: `PEZ_DATA_DIR` → `__fish_user_data_dir/pez` → `XDG_DATA_HOME/fish/pez` → `~/.local/share/fish/pez`.
+- Config dir precedence: `PEZ_CONFIG_DIR` > `__fish_config_dir` > `XDG_CONFIG_HOME/fish` > `~/.config/fish`.
+- `PEZ_TARGET_DIR` only adjusts the copy destination; configuration and lock files stay under the config precedence above.
+- Data dir precedence: `PEZ_DATA_DIR` > `__fish_user_data_dir/pez` > `XDG_DATA_HOME/fish/pez` > `~/.local/share/fish/pez`.
 - Copy destination: defaults to the Fish config directory and can be overridden via `PEZ_TARGET_DIR` (or falls back to `__fish_config_dir` / `XDG_CONFIG_HOME/fish`).
 
 ## Upgrade Semantics
