@@ -175,10 +175,13 @@ and is updated if it already exists.
 
 ### Concurrency
 
-Control job parallelism with `PEZ_JOBS` (default: 4):
+Control job parallelism with the global `--jobs <N>` flag or the `PEZ_JOBS`
+environment variable (default: 4). The CLI flag takes precedence over the
+environment variable.
 
-- `install` (when CLI explicit targets are given): cloning is bounded by `PEZ_JOBS`
-- `upgrade` / `uninstall` / `prune` also honor `PEZ_JOBS`
+- `install` (when CLI explicit targets are given): cloning is bounded by the
+  configured job limit
+- `upgrade` / `uninstall` / `prune` also honor the same job limit
 
 ### Existing Clone Behavior
 

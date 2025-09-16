@@ -5,7 +5,11 @@ use crate::{
 };
 use anyhow::Context;
 use console::Emoji;
-use std::{collections::HashSet, env, fmt, fs, path};
+use std::{
+    collections::HashSet,
+    env, fmt, fs, path,
+    sync::{Mutex, OnceLock},
+};
 use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
 
@@ -77,12 +81,29 @@ pub(crate) fn load_pez_data_dir() -> anyhow::Result<path::PathBuf> {
 }
 
 pub(crate) fn load_jobs() -> usize {
+    if let Some(override_jobs) = cli_jobs_override().lock().unwrap().as_ref().copied() {
+        return override_jobs;
+    }
     if let Ok(val) = env::var("PEZ_JOBS")
         && let Ok(n) = val.parse::<usize>()
     {
         return n.max(1);
     }
     4
+}
+
+pub(crate) fn set_cli_jobs_override(value: Option<usize>) {
+    *cli_jobs_override().lock().unwrap() = value;
+}
+
+fn cli_jobs_override() -> &'static Mutex<Option<usize>> {
+    static JOBS_OVERRIDE: OnceLock<Mutex<Option<usize>>> = OnceLock::new();
+    JOBS_OVERRIDE.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(test)]
+pub(crate) fn clear_cli_jobs_override_for_tests() {
+    *cli_jobs_override().lock().unwrap() = None;
 }
 
 pub(crate) fn load_config() -> anyhow::Result<(config::Config, path::PathBuf)> {
@@ -516,6 +537,34 @@ mod tests {
 
         let resolved = load_fish_config_dir().expect("fish config dir should resolve");
         assert_eq!(resolved, target_dir);
+    }
+
+    #[test]
+    fn load_jobs_prefers_cli_override() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["PEZ_JOBS"]);
+        clear_cli_jobs_override_for_tests();
+        unsafe {
+            std::env::set_var("PEZ_JOBS", "8");
+        }
+        set_cli_jobs_override(Some(2));
+        assert_eq!(load_jobs(), 2);
+        clear_cli_jobs_override_for_tests();
+    }
+
+    #[test]
+    fn load_jobs_falls_back_to_env_when_override_absent() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["PEZ_JOBS"]);
+        clear_cli_jobs_override_for_tests();
+        unsafe {
+            std::env::set_var("PEZ_JOBS", "6");
+        }
+        assert_eq!(load_jobs(), 6);
+        unsafe {
+            std::env::remove_var("PEZ_JOBS");
+        }
+        assert_eq!(load_jobs(), 4);
     }
 
     struct TestDataBuilder {

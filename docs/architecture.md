@@ -26,10 +26,15 @@ This document outlines the high‑level structure and flows in pez.
 
 ## Concurrency
 
-- `PEZ_JOBS` controls concurrency for `upgrade`, `uninstall`, and `prune`.
+- `--jobs <N>` globally overrides concurrency for `upgrade`, `uninstall`, `prune`,
+  and the clone phase of `install` when explicit targets are provided. When the
+  flag is absent, `PEZ_JOBS` acts as the environment override (default: 4).
 - `install` concurrency depends on how it is invoked:
-  - With explicit targets (`install <targets...>`): clones run concurrently (bounded by `PEZ_JOBS`), file copies run sequentially with duplicate‑path detection and warnings.
-  - From `pez.toml` (no targets): processing is sequential and uses the same duplicate‑path detection; conflicting plugins are skipped with a warning.
+  - With explicit targets (`install <targets...>`): clones run concurrently
+    (bounded by the configured job limit), file copies run sequentially with
+    duplicate‑path detection and warnings.
+  - From `pez.toml` (no targets): processing is sequential and uses the same
+    duplicate‑path detection; conflicting plugins are skipped with a warning.
 
 ## Paths and Resolution
 
