@@ -84,7 +84,10 @@ Notes
 - `PEZ_TARGET_DIR` — Override the Fish config directory used for copying plugin files. It no longer changes where `pez.toml` or `pez-lock.toml` live.
 - `__fish_config_dir` / `XDG_CONFIG_HOME` — Fish configuration directory.
 - `__fish_user_data_dir` / `XDG_DATA_HOME` — Fish data directory.
-- `PEZ_JOBS` — Concurrency for `upgrade`, `uninstall`, and `prune` (default: 4). Also limits clone concurrency for `install` when explicit CLI targets are provided.
+- `--jobs <N>` — Global CLI flag to override concurrency for `install` (explicit
+  targets), `upgrade`, `uninstall`, and `prune`. Must be a positive integer.
+- `PEZ_JOBS` — Environment override for the same concurrency (default: 4). Ignored
+  when `--jobs` is provided.
 - `RUST_LOG` — Log filtering (takes precedence over `-v`).
 
 ### Migration Note (PEZ_TARGET_DIR)

@@ -3,12 +3,26 @@ use clap::{Args, Parser, Subcommand};
 #[allow(unused_imports)]
 use serde_derive::{Deserialize, Serialize};
 
+fn parse_jobs_override(raw: &str) -> Result<usize, String> {
+    let value: usize = raw
+        .parse()
+        .map_err(|_| format!("Invalid value '{raw}'. Expected a positive integer."))?;
+    if value == 0 {
+        return Err("Job count must be at least 1.".to_string());
+    }
+    Ok(value)
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "pez", version, about, long_about = None)]
 pub(crate) struct Cli {
     /// Increase output verbosity (-v for info, -vv for debug)
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub(crate) verbose: u8,
+
+    /// Override job concurrency for clone/upgrade/prune operations (default: 4 when unset)
+    #[arg(long, value_name = "N", value_parser = parse_jobs_override)]
+    pub(crate) jobs: Option<usize>,
 
     #[command(subcommand)]
     pub(crate) command: Commands,
@@ -323,6 +337,18 @@ mod tests {
         assert!(r.is_local);
         let cwd = std::env::current_dir().unwrap();
         assert!(r.source.starts_with(&*cwd.to_string_lossy()));
+    }
+
+    #[test]
+    fn parse_jobs_override() {
+        let cli = Cli::parse_from(["pez", "--jobs", "3", "list"]);
+        assert_eq!(cli.jobs, Some(3));
+        assert!(matches!(cli.command, Commands::List(_)));
+    }
+
+    #[test]
+    fn jobs_override_rejects_zero() {
+        assert!(Cli::try_parse_from(["pez", "--jobs", "0", "list"]).is_err());
     }
 }
 

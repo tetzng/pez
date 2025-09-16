@@ -17,6 +17,8 @@ mod tests_support;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = cli::Cli::parse();
+    let jobs_override = cli.jobs;
+    utils::set_cli_jobs_override(jobs_override);
     // Configure console color policy up front (affects console::style rendering)
     let colors_enabled = utils::colors_enabled_for_stderr();
     console::set_colors_enabled(colors_enabled);
