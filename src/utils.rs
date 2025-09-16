@@ -333,7 +333,10 @@ pub(crate) fn emit_event(file_name_or_path: &str, event: &Event) -> anyhow::Resu
 }
 
 fn warn_no_plugin_files() {
-    warn!("{} No valid files found in the repository.", label_warning());
+    warn!(
+        "{} No valid files found in the repository.",
+        label_warning()
+    );
     warn!(
         "Ensure that it contains at least one file in 'functions', 'completions', 'conf.d', or 'themes'."
     );
@@ -341,54 +344,49 @@ fn warn_no_plugin_files() {
 
 // --- Color-aware labels ----------------------------------------------------
 // Colored labels when ANSI is supported; plain otherwise.
-fn colors_enabled_for_stderr() -> bool {
+pub(crate) fn colors_enabled_for_stderr() -> bool {
     if std::env::var_os("NO_COLOR").is_some() {
         return false;
     }
-    if std::env::var_os("CLICOLOR_FORCE").is_some() || std::env::var_os("FORCE_COLOR").is_some() {
+
+    let force_color = |key: &str| match std::env::var(key) {
+        Ok(v) => v != "0",
+        Err(_) => false,
+    };
+    if force_color("CLICOLOR_FORCE") || force_color("FORCE_COLOR") {
         return true;
     }
-    if let Ok(v) = std::env::var("CLICOLOR") {
-        if v == "0" { return false; }
+
+    if matches!(std::env::var("CLICOLOR"), Ok(v) if v == "0") {
+        return false;
     }
-    if let Ok(term) = std::env::var("TERM") {
-        if term == "dumb" { return false; }
+
+    if matches!(std::env::var("TERM"), Ok(term) if term == "dumb") {
+        return false;
     }
-    #[allow(deprecated)]
-    use std::io::IsTerminal;
-    std::io::stderr().is_terminal()
+
+    let term = console::Term::stderr();
+    if !term.features().colors_supported() {
+        return false;
+    }
+
+    term.features().is_attended()
 }
 
-pub(crate) fn label_info() -> String {
-    if colors_enabled_for_stderr() {
-        console::Style::new().cyan().apply_to("[Info]").to_string()
-    } else {
-        "[Info]".to_string()
-    }
+pub(crate) fn label_info() -> &'static str {
+    "[Info]"
 }
 
-pub(crate) fn label_warning() -> String {
-    if colors_enabled_for_stderr() {
-        console::Style::new().yellow().apply_to("[Warning]").to_string()
-    } else {
-        "[Warning]".to_string()
-    }
+pub(crate) fn label_warning() -> &'static str {
+    "[Warning]"
 }
 
-pub(crate) fn label_error() -> String {
-    if colors_enabled_for_stderr() {
-        console::Style::new().red().bold().apply_to("[Error]").to_string()
-    } else {
-        "[Error]".to_string()
-    }
+pub(crate) fn label_error() -> &'static str {
+    "[Error]"
 }
 
-pub(crate) fn label_notice() -> String {
-    if colors_enabled_for_stderr() {
-        console::Style::new().magenta().apply_to("[Notice]").to_string()
-    } else {
-        "[Notice]".to_string()
-    }
+pub(crate) fn label_notice() -> &'static str {
+    "[Notice]"
 }
 
 #[cfg(test)]

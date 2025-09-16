@@ -32,7 +32,7 @@ pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
         r??;
     }
     info!(
-        "\n{}All specified plugins have been uninstalled successfully!",
+        "{}All specified plugins have been uninstalled successfully!",
         Emoji("🎉 ", "")
     );
 
@@ -82,12 +82,12 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 fs::remove_dir_all(&repo_path)?;
             } else {
                 let path_display = repo_path.display();
-            warn!(
-                "{} {} Repository directory at {} does not exist.",
-                Emoji("🚧 ", ""),
-                crate::utils::label_warning(),
-                path_display
-            );
+                warn!(
+                    "{} {} Repository directory at {} does not exist.",
+                    Emoji("🚧 ", ""),
+                    crate::utils::label_warning(),
+                    path_display
+                );
                 if !force {
                     info!(
                         "{}Detected plugin files based on pez-lock.toml:",
@@ -151,6 +151,7 @@ mod tests {
     use crate::config;
     use crate::lock_file::{self, LockFile, PluginFile};
     use crate::tests_support::env::TestEnvironmentSetup;
+    use crate::tests_support::log::capture_logs;
 
     #[test]
     fn test_uninstall_removes_repo_and_files_and_updates_lock_and_config() {
@@ -158,6 +159,10 @@ mod tests {
         let mut env = TestEnvironmentSetup::new();
 
         // Ensure pez uses our isolated dirs
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let prev_fc = std::env::var_os("__fish_config_dir");
+        let prev_pc = std::env::var_os("PEZ_CONFIG_DIR");
+        let prev_pd = std::env::var_os("PEZ_DATA_DIR");
         unsafe {
             std::env::set_var("__fish_config_dir", &env.fish_config_dir);
             std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
@@ -224,5 +229,105 @@ mod tests {
                 .into_iter()
                 .all(|p| p.get_plugin_repo().unwrap() != repo)
         );
+
+        // restore env
+        unsafe {
+            if let Some(v) = prev_fc {
+                std::env::set_var("__fish_config_dir", v)
+            } else {
+                std::env::remove_var("__fish_config_dir")
+            }
+            if let Some(v) = prev_pc {
+                std::env::set_var("PEZ_CONFIG_DIR", v)
+            } else {
+                std::env::remove_var("PEZ_CONFIG_DIR")
+            }
+            if let Some(v) = prev_pd {
+                std::env::set_var("PEZ_DATA_DIR", v)
+            } else {
+                std::env::remove_var("PEZ_DATA_DIR")
+            }
+        }
+    }
+
+    #[test]
+    fn test_uninstall_logs_repo_missing_without_force() {
+        // Setup isolated test environment
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let prev_fc = std::env::var_os("__fish_config_dir");
+        let prev_pc = std::env::var_os("PEZ_CONFIG_DIR");
+        let prev_pd = std::env::var_os("PEZ_DATA_DIR");
+        let prev_nc = std::env::var_os("NO_COLOR");
+        unsafe {
+            std::env::set_var("__fish_config_dir", &env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
+            std::env::set_var("NO_COLOR", "1");
+        }
+
+        // Create config with one plugin and lockfile with one file entry
+        let repo = PluginRepo {
+            owner: "owner".into(),
+            repo: "missing".into(),
+        };
+        env.setup_config(config::Config {
+            plugins: Some(vec![config::PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: repo.clone(),
+                    version: None,
+                    branch: None,
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        });
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![crate::lock_file::Plugin {
+                name: "missing".into(),
+                repo: repo.clone(),
+                source: format!("https://github.com/{}", repo.as_str()),
+                commit_sha: "abc1234".into(),
+                files: vec![PluginFile {
+                    dir: TargetDir::Functions,
+                    name: "hello.fish".into(),
+                }],
+            }],
+        });
+
+        // Act: repo dir does not exist and force = false
+        let (logs, res) = capture_logs(|| uninstall(&repo, false));
+        assert!(res.is_err());
+        let joined = logs.join("\n");
+        assert!(joined.contains("[Warning]"));
+        assert!(joined.contains("Repository directory at"));
+        assert!(joined.contains("Detected plugin files based on pez-lock.toml"));
+        assert!(!joined.contains("\u{1b}["));
+
+        // restore env
+        unsafe {
+            if let Some(v) = prev_fc {
+                std::env::set_var("__fish_config_dir", v)
+            } else {
+                std::env::remove_var("__fish_config_dir")
+            }
+            if let Some(v) = prev_pc {
+                std::env::set_var("PEZ_CONFIG_DIR", v)
+            } else {
+                std::env::remove_var("PEZ_CONFIG_DIR")
+            }
+            if let Some(v) = prev_pd {
+                std::env::set_var("PEZ_DATA_DIR", v)
+            } else {
+                std::env::remove_var("PEZ_DATA_DIR")
+            }
+            if let Some(v) = prev_nc {
+                std::env::set_var("NO_COLOR", v)
+            } else {
+                std::env::remove_var("NO_COLOR")
+            }
+        }
     }
 }

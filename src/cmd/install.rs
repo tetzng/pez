@@ -558,7 +558,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
     if !ignored_lock_file_plugins.is_empty() {
         if *prune {
             for plugin in ignored_lock_file_plugins {
-                info!("\n{}Removing plugin: {}", Emoji("🐟 ", ""), &plugin.name);
+                info!("{}Removing plugin: {}", Emoji("🐟 ", ""), &plugin.name);
                 let repo_path = utils::load_pez_data_dir()?.join(plugin.repo.as_str());
                 if repo_path.exists() {
                     fs::remove_dir_all(&repo_path)?;
@@ -610,7 +610,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
             }
         } else {
             info!(
-                "\n{} The following plugins are in pez-lock.toml but not in pez.toml:",
+                "{} The following plugins are in pez-lock.toml but not in pez.toml:",
                 crate::utils::label_notice()
             );
             for plugin in ignored_lock_file_plugins {

@@ -20,7 +20,7 @@ pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
             .map(|plugin| {
                 let plugin = plugin.clone();
                 tokio::task::spawn_blocking(move || {
-                    info!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &plugin);
+                    info!("{}Upgrading plugin: {}", Emoji("✨ ", ""), &plugin);
                     let res = upgrade(&plugin);
                     if res.is_ok() {
                         info!(
@@ -41,7 +41,7 @@ pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
         upgrade_all().await?;
     }
     info!(
-        "\n{}All specified plugins have been upgraded successfully!",
+        "{}All specified plugins have been upgraded successfully!",
         Emoji("🎉 ", "")
     );
 
@@ -101,7 +101,7 @@ async fn upgrade_all() -> anyhow::Result<()> {
         let tasks = stream::iter(repos.into_iter())
             .map(|repo| {
                 tokio::task::spawn_blocking(move || {
-                    info!("\n{}Upgrading plugin: {}", Emoji("✨ ", ""), &repo);
+                    info!("{}Upgrading plugin: {}", Emoji("✨ ", ""), &repo);
                     upgrade_plugin(&repo)
                 })
             })
@@ -218,4 +218,126 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config;
+    use crate::lock_file::{LockFile, PluginFile};
+    use crate::tests_support::env::TestEnvironmentSetup;
+    use crate::tests_support::log::capture_logs;
+
+    #[test]
+    fn test_upgrade_logs_already_up_to_date() {
+        // Setup isolated test environment
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let prev_fc = std::env::var_os("__fish_config_dir");
+        let prev_pc = std::env::var_os("PEZ_CONFIG_DIR");
+        let prev_pd = std::env::var_os("PEZ_DATA_DIR");
+        let prev_nc = std::env::var_os("NO_COLOR");
+        unsafe {
+            std::env::set_var("__fish_config_dir", &env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
+            std::env::set_var("NO_COLOR", "1");
+        }
+
+        // Local origin + work repo with one commit on main
+        let tmp = tempfile::tempdir().unwrap();
+        let origin_path = tmp.path().join("origin.git");
+        let workdir_path = tmp.path().join("work");
+        let origin = git2::Repository::init_bare(&origin_path).unwrap();
+        let work = git2::Repository::init(&workdir_path).unwrap();
+        {
+            let mut cfg = work.config().unwrap();
+            cfg.set_str("user.name", "tester").unwrap();
+            cfg.set_str("user.email", "tester@example.com").unwrap();
+        }
+        std::fs::create_dir_all(&workdir_path).unwrap();
+        std::fs::write(workdir_path.join("README.md"), "hello").unwrap();
+        let mut index = work.index().unwrap();
+        index.add_path(std::path::Path::new("README.md")).unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = work.find_tree(tree_oid).unwrap();
+        let sig = work.signature().unwrap();
+        let commit_oid = work
+            .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        work.remote("origin", origin_path.to_str().unwrap())
+            .unwrap();
+        {
+            let mut remote = work.find_remote("origin").unwrap();
+            remote
+                .connect(git2::Direction::Push)
+                .and_then(|_| remote.push(&["refs/heads/main:refs/heads/main"], None))
+                .unwrap();
+        }
+        origin.set_head("refs/heads/main").unwrap();
+
+        let repo = PluginRepo {
+            owner: "owner".into(),
+            repo: "pkg".into(),
+        };
+        let repo_path = env.data_dir.join(repo.as_str());
+        crate::git::clone_repository(origin_path.to_str().unwrap(), &repo_path).unwrap();
+
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![crate::lock_file::Plugin {
+                name: "pkg".into(),
+                repo: repo.clone(),
+                source: "https://example.com/owner/pkg".into(),
+                commit_sha: commit_oid.to_string(),
+                files: vec![PluginFile {
+                    dir: TargetDir::Functions,
+                    name: "hello.fish".into(),
+                }],
+            }],
+        });
+        env.setup_config(config::Config {
+            plugins: Some(vec![config::PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: repo.clone(),
+                    version: None,
+                    branch: None,
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        });
+
+        let (logs, res) = capture_logs(|| upgrade_plugin(&repo));
+        assert!(res.is_ok());
+        let joined = logs.join("\n");
+        assert!(joined.contains("Plugin owner/pkg is already up to date."));
+        assert!(joined.contains("[Info]"));
+        assert!(!joined.contains("\u{1b}["));
+
+        // restore env
+        unsafe {
+            if let Some(v) = prev_fc {
+                std::env::set_var("__fish_config_dir", v)
+            } else {
+                std::env::remove_var("__fish_config_dir")
+            }
+            if let Some(v) = prev_pc {
+                std::env::set_var("PEZ_CONFIG_DIR", v)
+            } else {
+                std::env::remove_var("PEZ_CONFIG_DIR")
+            }
+            if let Some(v) = prev_pd {
+                std::env::set_var("PEZ_DATA_DIR", v)
+            } else {
+                std::env::remove_var("PEZ_DATA_DIR")
+            }
+            if let Some(v) = prev_nc {
+                std::env::set_var("NO_COLOR", v)
+            } else {
+                std::env::remove_var("NO_COLOR")
+            }
+        }
+    }
 }

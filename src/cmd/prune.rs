@@ -34,7 +34,7 @@ pub(crate) async fn run(args: &PruneArgs) -> anyhow::Result<()> {
         info!("{}Starting dry run prune process...", Emoji("🔍 ", ""));
         dry_run(args.force, &mut ctx)?;
         info!(
-            "\n{}Dry run completed. No files have been removed.",
+            "{}Dry run completed. No files have been removed.",
             Emoji("🎉 ", "")
         );
     } else {
@@ -356,6 +356,7 @@ mod tests {
     use std::vec;
 
     use super::*;
+    use crate::tests_support::log::capture_logs;
     use crate::{
         lock_file::{self, PluginFile},
         models::PluginRepo,
@@ -690,8 +691,7 @@ mod tests {
         test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
 
         let mut ctx = test_env.create_context();
-
-        let result = dry_run(false, &mut ctx);
+        let (logs, result) = capture_logs(|| dry_run(false, &mut ctx));
         assert!(result.is_ok());
 
         let saved_lock_file = lock_file::load(ctx.lock_file_path).unwrap();
@@ -708,5 +708,10 @@ mod tests {
             fs::metadata(ctx.data_dir.join("owner/used-repo")).is_ok(),
             "Used repo directory should still exist"
         );
+
+        let joined = logs.join("\n");
+        assert!(joined.contains("Plugins that would be removed:"));
+        assert!(joined.contains("owner/unused-repo"));
+        assert!(!joined.contains("\u{1b}["));
     }
 }
