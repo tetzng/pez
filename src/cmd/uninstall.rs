@@ -2,7 +2,7 @@ use crate::{cli::UninstallArgs, models::PluginRepo, models::TargetDir, utils};
 
 use console::Emoji;
 use futures::{StreamExt, stream};
-use std::fs;
+use std::{collections::HashSet, fs, io};
 use tracing::{error, info, warn};
 
 pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
@@ -13,6 +13,7 @@ pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
         let stdin_plugins = read_plugins_from_stdin()?;
         plugins.extend(stdin_plugins);
     }
+    normalize_plugins(&mut plugins);
     if plugins.is_empty() {
         anyhow::bail!("No plugins specified for uninstall");
     }
@@ -39,11 +40,14 @@ pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
-fn read_plugins_from_stdin() -> anyhow::Result<Vec<PluginRepo>> {
-    use std::io::{self, Read};
+fn normalize_plugins(plugins: &mut Vec<PluginRepo>) {
+    let mut seen = HashSet::new();
+    plugins.retain(|repo| seen.insert(repo.as_str()));
+}
+
+fn read_plugins_from_reader<R: io::Read>(mut reader: R) -> anyhow::Result<Vec<PluginRepo>> {
     let mut buf = String::new();
-    io::stdin().read_to_string(&mut buf)?;
+    reader.read_to_string(&mut buf)?;
     let mut out = Vec::new();
     for line in buf.lines() {
         let s = line.trim();
@@ -58,6 +62,13 @@ fn read_plugins_from_stdin() -> anyhow::Result<Vec<PluginRepo>> {
     out.sort_by_key(|a| a.as_str());
     out.dedup_by(|a, b| a.as_str() == b.as_str());
     Ok(out)
+}
+
+#[allow(dead_code)]
+fn read_plugins_from_stdin() -> anyhow::Result<Vec<PluginRepo>> {
+    let stdin = io::stdin();
+    let handle = stdin.lock();
+    read_plugins_from_reader(handle)
 }
 
 pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result<()> {
@@ -152,6 +163,46 @@ mod tests {
     use crate::lock_file::{self, LockFile, PluginFile};
     use crate::tests_support::env::TestEnvironmentSetup;
     use crate::tests_support::log::capture_logs;
+    use std::io::Cursor;
+
+    #[test]
+    fn read_plugins_from_reader_filters_and_sorts_entries() {
+        let input = r"
+
+# comment line
+owner/plugin-a
+invalid entry
+owner/plugin-b
+owner/plugin-a
+";
+
+        let (logs, result) = capture_logs(|| read_plugins_from_reader(Cursor::new(input)));
+        let plugins = result.expect("parsing should succeed");
+        let names: Vec<String> = plugins.iter().map(|p| p.as_str()).collect();
+        assert_eq!(names, vec!["owner/plugin-a", "owner/plugin-b"]);
+        assert!(
+            logs.iter()
+                .any(|msg| msg.contains("Skipping unrecognized entry")),
+            "logs: {:?}",
+            logs
+        );
+    }
+
+    #[test]
+    fn normalize_plugins_removes_duplicates_preserving_first_occurrence() {
+        let mut plugins = vec![
+            "owner/one".parse::<PluginRepo>().unwrap(),
+            "owner/two".parse::<PluginRepo>().unwrap(),
+            "owner/one".parse::<PluginRepo>().unwrap(),
+            "owner/three".parse::<PluginRepo>().unwrap(),
+            "owner/two".parse::<PluginRepo>().unwrap(),
+        ];
+
+        normalize_plugins(&mut plugins);
+
+        let names: Vec<String> = plugins.iter().map(|p| p.as_str()).collect();
+        assert_eq!(names, vec!["owner/one", "owner/two", "owner/three"]);
+    }
 
     #[test]
     fn test_uninstall_removes_repo_and_files_and_updates_lock_and_config() {
@@ -246,6 +297,93 @@ mod tests {
                 std::env::set_var("PEZ_DATA_DIR", v)
             } else {
                 std::env::remove_var("PEZ_DATA_DIR")
+            }
+        }
+    }
+
+    #[test]
+    fn test_uninstall_honors_target_dir_override() {
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+
+        let prev_fc = std::env::var_os("__fish_config_dir");
+        let prev_pc = std::env::var_os("PEZ_CONFIG_DIR");
+        let prev_pd = std::env::var_os("PEZ_DATA_DIR");
+        let prev_pt = std::env::var_os("PEZ_TARGET_DIR");
+
+        let repo = PluginRepo {
+            owner: "owner".into(),
+            repo: "alt".into(),
+        };
+
+        let override_dir = env.fish_config_dir.join("alt_target");
+        std::fs::create_dir_all(&override_dir).unwrap();
+
+        unsafe {
+            std::env::remove_var("__fish_config_dir");
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
+            std::env::set_var("PEZ_TARGET_DIR", &override_dir);
+        }
+
+        let spec = config::PluginSpec {
+            name: None,
+            source: config::PluginSource::Repo {
+                repo: repo.clone(),
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        env.setup_config(config::Config {
+            plugins: Some(vec![spec]),
+        });
+        env.setup_data_repo(vec![repo.clone()]);
+
+        let target_dir = override_dir.join(TargetDir::Functions.as_str());
+        std::fs::create_dir_all(&target_dir).unwrap();
+        let target_file = target_dir.join("alt.fish");
+        std::fs::write(&target_file, "echo hi").unwrap();
+
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![crate::lock_file::Plugin {
+                name: "alt".into(),
+                repo: repo.clone(),
+                source: format!("https://github.com/{}", repo.as_str()),
+                commit_sha: "abc1234".into(),
+                files: vec![PluginFile {
+                    dir: TargetDir::Functions,
+                    name: "alt.fish".into(),
+                }],
+            }],
+        });
+
+        uninstall(&repo, true).expect("uninstall should succeed");
+
+        assert!(std::fs::metadata(&target_file).is_err());
+
+        unsafe {
+            if let Some(v) = prev_fc {
+                std::env::set_var("__fish_config_dir", v);
+            } else {
+                std::env::remove_var("__fish_config_dir");
+            }
+            if let Some(v) = prev_pc {
+                std::env::set_var("PEZ_CONFIG_DIR", v);
+            } else {
+                std::env::remove_var("PEZ_CONFIG_DIR");
+            }
+            if let Some(v) = prev_pd {
+                std::env::set_var("PEZ_DATA_DIR", v);
+            } else {
+                std::env::remove_var("PEZ_DATA_DIR");
+            }
+            if let Some(v) = prev_pt {
+                std::env::set_var("PEZ_TARGET_DIR", v);
+            } else {
+                std::env::remove_var("PEZ_TARGET_DIR");
             }
         }
     }
