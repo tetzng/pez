@@ -9,6 +9,7 @@ use crate::{
     utils,
 };
 
+use anyhow::Context;
 use console::Emoji;
 use futures::{StreamExt, stream};
 use std::{fs, path, result, sync::Arc};
@@ -414,10 +415,25 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     repo_path_display
                 );
                 // For local path sources, cloning is not applicable
-                let repo = if git::is_local_source(&source_base) {
+                let is_local_source = git::is_local_source(&source_base);
+                if repo_path.exists() && *force && !is_local_source {
+                    fs::remove_dir_all(&repo_path).with_context(|| {
+                        format!("failed to remove existing repo at {}", repo_path.display())
+                    })?;
+                }
+
+                let repo = if is_local_source {
                     None
                 } else {
-                    Some(git::clone_repository(&source_base, &repo_path)?)
+                    Some(
+                        git::clone_repository(&source_base, &repo_path).with_context(|| {
+                            format!(
+                                "failed to clone {} into {}",
+                                &source_base,
+                                repo_path.display()
+                            )
+                        })?,
+                    )
                 };
                 let commit_sha = if *force {
                     if let Some(repo) = &repo {
@@ -631,6 +647,56 @@ mod tests {
 
     use super::*;
     use crate::tests_support::env::TestEnvironmentSetup;
+    use std::path::Path;
+
+    struct EnvOverride {
+        entries: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvOverride {
+        fn new(keys: &[&'static str]) -> Self {
+            let entries = keys
+                .iter()
+                .map(|&key| (key, std::env::var_os(key)))
+                .collect();
+            Self { entries }
+        }
+    }
+
+    impl Drop for EnvOverride {
+        fn drop(&mut self) {
+            for (key, value) in &self.entries {
+                if let Some(v) = value {
+                    unsafe {
+                        std::env::set_var(key, v);
+                    }
+                } else {
+                    unsafe {
+                        std::env::remove_var(key);
+                    }
+                }
+            }
+        }
+    }
+
+    fn init_remote_repo(path: &Path) -> String {
+        std::fs::create_dir_all(path).unwrap();
+        let repo = git2::Repository::init(path).unwrap();
+        let conf_dir = path.join(TargetDir::ConfD.as_str());
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        std::fs::write(conf_dir.join("force-test.fish"), "echo force test\n").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("conf.d/force-test.fish")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = git2::Signature::now("pez", "pez@example.com").unwrap();
+        let commit_id = repo
+            .commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+            .unwrap();
+        commit_id.to_string()
+    }
 
     struct TestDataBuilder {
         new_plugin_spec: PluginSpec,
@@ -787,5 +853,90 @@ mod tests {
         let result = handle_existing_repository(&false, &repo, &repo_path);
         assert!(result.is_err());
         assert!(repo_path.exists());
+    }
+
+    #[test]
+    fn install_all_force_reclones_remote_repo() {
+        let _log_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "HOME",
+        ]);
+
+        let remote_root = tempfile::tempdir().unwrap();
+        let remote_repo_path = remote_root.path().join("owner").join("force-repo");
+        let expected_commit = init_remote_repo(&remote_repo_path);
+        let remote_url = format!("file://{}", remote_repo_path.display());
+
+        let plugin_repo = PluginRepo {
+            owner: "owner".to_string(),
+            repo: "force-repo".to_string(),
+        };
+
+        let plugin_spec = PluginSpec {
+            name: None,
+            source: PluginSource::Url {
+                url: remote_url.clone(),
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![plugin_spec]),
+        });
+
+        let lock_plugin = Plugin {
+            name: "force-repo".to_string(),
+            repo: plugin_repo.clone(),
+            source: remote_url.clone(),
+            commit_sha: "old-lock-sha".to_string(),
+            files: vec![],
+        };
+        test_env.setup_lock_file(crate::lock_file::LockFile {
+            version: 1,
+            plugins: vec![lock_plugin],
+        });
+
+        let repo_path = test_env.data_dir.join(plugin_repo.as_str());
+        std::fs::create_dir_all(&repo_path).unwrap();
+        std::fs::write(repo_path.join("stale.txt"), b"stale").unwrap();
+
+        unsafe {
+            std::env::set_var("PEZ_CONFIG_DIR", &test_env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &test_env.data_dir);
+            std::env::set_var("PEZ_TARGET_DIR", &test_env.fish_config_dir);
+            std::env::remove_var("__fish_config_dir");
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::set_var("HOME", test_env._temp_dir.path());
+        }
+
+        let force = true;
+        let prune = false;
+        let result = install_all(&force, &prune);
+        assert!(
+            result.is_ok(),
+            "install_all should succeed with --force when repo exists"
+        );
+
+        assert!(repo_path.join(".git").exists());
+        assert!(!repo_path.join("stale.txt").exists());
+
+        let fish_file = test_env
+            .fish_config_dir
+            .join(TargetDir::ConfD.as_str())
+            .join("force-test.fish");
+        assert!(fish_file.exists());
+
+        let saved_lock = crate::lock_file::load(&test_env.lock_file_path).unwrap();
+        let updated_plugin = saved_lock.get_plugin_by_repo(&plugin_repo).unwrap();
+        assert_eq!(updated_plugin.commit_sha, expected_commit);
+        assert_eq!(updated_plugin.source, remote_url);
     }
 }
