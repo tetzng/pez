@@ -1,5 +1,4 @@
 use crate::resolver;
-use crate::resolver::{ref_kind_to_repo_source, ref_kind_to_url_source};
 use crate::{
     cli::InstallArgs,
     config, git,
@@ -84,67 +83,17 @@ fn add_plugins_to_config(
     config_path: &path::Path,
     targets: &[InstallTarget],
 ) -> anyhow::Result<()> {
-    let resolved: Vec<ResolvedInstallTarget> = targets
-        .iter()
-        .map(|t| t.resolve())
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    match config.plugins {
-        Some(ref mut plugin_specs) => {
-            for r in &resolved {
-                if !plugin_specs
-                    .iter()
-                    .any(|p| p.get_plugin_repo().is_ok_and(|pr| pr == r.plugin_repo))
-                {
-                    let default_source = format!("https://github.com/{}", r.plugin_repo.as_str());
-                    let spec = if r.is_local {
-                        config::PluginSpec {
-                            name: None,
-                            source: config::PluginSource::Path {
-                                path: r.source.clone(),
-                            },
-                        }
-                    } else if r.source == default_source {
-                        config::PluginSpec {
-                            name: None,
-                            source: ref_kind_to_repo_source(&r.plugin_repo, &r.ref_kind),
-                        }
-                    } else {
-                        config::PluginSpec {
-                            name: None,
-                            source: ref_kind_to_url_source(&r.source, &r.ref_kind),
-                        }
-                    };
-                    plugin_specs.push(spec);
-                }
-            }
-        }
-        None => {
-            let plugin_specs = resolved
-                .into_iter()
-                .map(|r| {
-                    let default_source = format!("https://github.com/{}", r.plugin_repo.as_str());
-                    if r.is_local {
-                        config::PluginSpec {
-                            name: None,
-                            source: config::PluginSource::Path { path: r.source },
-                        }
-                    } else if r.source == default_source {
-                        config::PluginSpec {
-                            name: None,
-                            source: ref_kind_to_repo_source(&r.plugin_repo, &r.ref_kind),
-                        }
-                    } else {
-                        config::PluginSpec {
-                            name: None,
-                            source: ref_kind_to_url_source(&r.source, &r.ref_kind),
-                        }
-                    }
-                })
-                .collect();
-            config.plugins = Some(plugin_specs);
+    let mut changed = false;
+    for target in targets {
+        let resolved = target.resolve()?;
+        if config.ensure_plugin_from_resolved(&resolved) {
+            changed = true;
         }
     }
-    config.save(&config_path.to_path_buf())?;
+
+    if changed {
+        config.save(&config_path.to_path_buf())?;
+    }
 
     Ok(())
 }

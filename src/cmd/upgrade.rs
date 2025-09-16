@@ -1,6 +1,5 @@
 use crate::{
     cli::UpgradeArgs,
-    config::PluginSpec,
     git,
     lock_file::Plugin,
     models::{PluginRepo, TargetDir},
@@ -51,38 +50,8 @@ pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
 fn upgrade(plugin: &PluginRepo) -> anyhow::Result<()> {
     let (mut config, config_path) = utils::load_or_create_config()?;
 
-    match config.plugins {
-        Some(ref mut plugin_specs) => {
-            if !plugin_specs
-                .iter()
-                .any(|p| p.get_plugin_repo().is_ok_and(|r| r == *plugin))
-            {
-                plugin_specs.push(PluginSpec {
-                    name: None,
-                    source: crate::config::PluginSource::Repo {
-                        repo: plugin.clone(),
-                        version: None,
-                        branch: None,
-                        tag: None,
-                        commit: None,
-                    },
-                });
-                config.save(&config_path)?;
-            }
-        }
-        None => {
-            config.plugins = Some(vec![PluginSpec {
-                name: None,
-                source: crate::config::PluginSource::Repo {
-                    repo: plugin.clone(),
-                    version: None,
-                    branch: None,
-                    tag: None,
-                    commit: None,
-                },
-            }]);
-            config.save(&config_path)?;
-        }
+    if config.ensure_plugin_for_repo(plugin) {
+        config.save(&config_path)?;
     }
 
     upgrade_plugin(plugin)?;
