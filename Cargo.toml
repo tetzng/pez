@@ -22,7 +22,7 @@ clap_complete = "4.5.58"
 regex = "1.11.2"
 futures = "0.3.31"
 tokio = { version = "1.47.1", features = ["macros", "rt", "rt-multi-thread", "sync"] }
-anyhow = "1.0.99"
+anyhow = "1.0.100"
 tempfile = "3.22.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
