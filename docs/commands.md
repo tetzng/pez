@@ -33,7 +33,7 @@ Global options
 - Options:
   - `--force` Remove files recorded in the lockfile even if the repository directory is missing.
   - `--stdin` Read `owner/repo` values from stdin. Blank lines and lines starting with `#` are ignored; the remaining entries are sorted and deduplicated before processing.
-- Behavior: removes the cloned repository (if present) and files recorded in `pez-lock.toml`. Without `--force` when the repo directory is missing, the command prints the target files and exits.
+- Behavior: removes the cloned repository (if present) and the files recorded in `pez-lock.toml`, then removes the matching entry from `pez.toml` to keep the configuration in sync. Without `--force` when the repo directory is missing, the command prints the target files and exits.
 - Example:
   - `printf "owner/a\nowner/b\n" | pez uninstall --stdin`
 
