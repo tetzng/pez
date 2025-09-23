@@ -21,6 +21,11 @@ repo = "owner/repo"
 # branch  = "main"
 # tag     = "v1.2.3"
 # commit  = "<sha>"    # 7+ chars recommended
+#
+# Non-GitHub host example
+# [[plugins]]
+# repo = "gitlab.com/owner/repo"
+# version = "latest"
 ```
 
 Generic Git host (url source)
@@ -46,6 +51,7 @@ Notes
 - If a URL has no scheme, pez normalizes it to https (e.g., `gitlab.com/...`).
 - CLI‑provided relative paths are normalized to absolute paths when recorded.
 - `path` must resolve to an absolute path (either absolute or `~/…`).
+- Host-prefixed repos (e.g., `gitlab.com/owner/repo`) are recorded as-is and cloned under `<host>/<owner>/<repo>` inside the data directory. GitHub shorthand (`owner/repo`) continues to map to `github.com`.
 
 ## pez-lock.toml
 

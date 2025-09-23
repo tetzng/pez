@@ -147,6 +147,9 @@ prioritized as follows:
 
 When you install a plugin, pez clones its repository into `pez_data_dir`.
 If the directory doesn’t exist, pez will create it.
+Remote repositories that specify a host are stored under `<host>/<owner>/<repo>`
+within that data directory (for example `gitlab.com/owner/tool`). GitHub shorthand
+targets (`owner/repo`) continue to resolve to `github.com/owner/repo`.
 If the repository is already cloned:
 
 - For explicit CLI targets (`pez install owner/repo ...`), pez logs a warning and skips the reinstall unless you pass `--force`.

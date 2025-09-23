@@ -396,6 +396,7 @@ mod tests {
             Plugin {
                 name: "name".to_string(),
                 repo: PluginRepo {
+                    host: None,
                     owner: "owner".to_string(),
                     repo: "repo".to_string(),
                 },
@@ -406,6 +407,7 @@ mod tests {
             Plugin {
                 name: "name2".to_string(),
                 repo: PluginRepo {
+                    host: None,
                     owner: "owner".to_string(),
                     repo: "repo2".to_string(),
                 },
@@ -635,6 +637,7 @@ mod tests {
         let _env_guard = configure_env(&env);
 
         let repo = PluginRepo {
+            host: None,
             owner: "owner".into(),
             repo: "pkg".into(),
         };
@@ -682,6 +685,7 @@ mod tests {
         let _env_guard = configure_env(&env);
 
         let repo = PluginRepo {
+            host: None,
             owner: "owner".into(),
             repo: "pkg".into(),
         };
@@ -729,6 +733,7 @@ mod tests {
         let _env_guard = configure_env(&env);
 
         let repo = PluginRepo {
+            host: None,
             owner: "owner".into(),
             repo: "pkg".into(),
         };
@@ -774,6 +779,7 @@ mod tests {
         let _env_guard = configure_env(&env);
 
         let repo = PluginRepo {
+            host: None,
             owner: "owner".into(),
             repo: "pkg".into(),
         };

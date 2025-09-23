@@ -377,6 +377,7 @@ mod tests {
                 used_plugin: Plugin {
                     name: "used-repo".to_string(),
                     repo: PluginRepo {
+                        host: None,
                         owner: "owner".to_string(),
                         repo: "used-repo".to_string(),
                     },
@@ -390,6 +391,7 @@ mod tests {
                 unused_plugin: Plugin {
                     name: "unused-repo".to_string(),
                     repo: PluginRepo {
+                        host: None,
                         owner: "owner".to_string(),
                         repo: "unused-repo".to_string(),
                     },
@@ -404,6 +406,7 @@ mod tests {
                     name: None,
                     source: PluginSource::Repo {
                         repo: PluginRepo {
+                            host: None,
                             owner: "owner".to_string(),
                             repo: "used-repo".to_string(),
                         },
