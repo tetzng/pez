@@ -213,52 +213,195 @@ fn parse_scp_like(raw: &str) -> Option<(Option<String>, String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{PluginSource, PluginSpec};
 
     #[test]
-    fn parses_owner_repo_pair() {
-        let repo: PluginRepo = "owner/repo".parse().unwrap();
-        assert_eq!(repo.host.as_deref(), None);
-        assert_eq!(repo.owner, "owner");
-        assert_eq!(repo.repo, "repo");
-        assert_eq!(repo.as_str(), "owner/repo");
-        assert_eq!(
-            repo.default_remote_source(),
-            "https://github.com/owner/repo"
-        );
+    fn plugin_repo_parsing_variants() {
+        struct Case {
+            input: &'static str,
+            expected_host: Option<&'static str>,
+            expected_owner: &'static str,
+            expected_repo: &'static str,
+        }
+
+        let cases = [
+            Case {
+                input: "owner/repo",
+                expected_host: None,
+                expected_owner: "owner",
+                expected_repo: "repo",
+            },
+            Case {
+                input: "gitlab.com/owner/repo",
+                expected_host: Some("gitlab.com"),
+                expected_owner: "owner",
+                expected_repo: "repo",
+            },
+        ];
+
+        for case in cases {
+            let repo: PluginRepo = case.input.parse().expect("parse repo");
+            assert_eq!(repo.host.as_deref(), case.expected_host);
+            assert_eq!(repo.owner, case.expected_owner);
+            assert_eq!(repo.repo, case.expected_repo);
+        }
+
+        struct RemoteCase {
+            url: &'static str,
+            expected_host: Option<&'static str>,
+            expected_owner: &'static str,
+            expected_repo: &'static str,
+        }
+
+        let remote_cases = [
+            RemoteCase {
+                url: "https://github.com/owner/repo",
+                expected_host: None,
+                expected_owner: "owner",
+                expected_repo: "repo",
+            },
+            RemoteCase {
+                url: "https://gitlab.com/owner/repo.git",
+                expected_host: Some("gitlab.com"),
+                expected_owner: "owner",
+                expected_repo: "repo",
+            },
+            RemoteCase {
+                url: "git@bitbucket.org:team/pkg.git",
+                expected_host: Some("bitbucket.org"),
+                expected_owner: "team",
+                expected_repo: "pkg",
+            },
+        ];
+
+        for case in remote_cases {
+            let repo = PluginRepo::from_remote_url(case.url).expect("parse remote url");
+            assert_eq!(repo.host.as_deref(), case.expected_host);
+            assert_eq!(repo.owner, case.expected_owner);
+            assert_eq!(repo.repo, case.expected_repo);
+        }
     }
 
     #[test]
-    fn parses_host_prefixed_pair() {
-        let repo: PluginRepo = "gitlab.com/owner/repo".parse().unwrap();
-        assert_eq!(repo.host.as_deref(), Some("gitlab.com"));
-        assert_eq!(repo.as_str(), "gitlab.com/owner/repo");
-        assert_eq!(
-            repo.default_remote_source(),
-            "https://gitlab.com/owner/repo"
-        );
+    fn install_target_resolves_host_metadata() {
+        struct Case {
+            raw: &'static str,
+            expected_host: Option<&'static str>,
+            expected_owner: &'static str,
+            expected_repo: &'static str,
+            expected_source: &'static str,
+        }
+
+        let cases = [
+            Case {
+                raw: "owner/repo",
+                expected_host: None,
+                expected_owner: "owner",
+                expected_repo: "repo",
+                expected_source: "https://github.com/owner/repo",
+            },
+            Case {
+                raw: "gitlab.com/owner/repo",
+                expected_host: Some("gitlab.com"),
+                expected_owner: "owner",
+                expected_repo: "repo",
+                expected_source: "https://gitlab.com/owner/repo",
+            },
+            Case {
+                raw: "https://gitlab.com/owner/repo.git",
+                expected_host: Some("gitlab.com"),
+                expected_owner: "owner",
+                expected_repo: "repo",
+                expected_source: "https://gitlab.com/owner/repo.git",
+            },
+            Case {
+                raw: "git@bitbucket.org:team/pkg.git",
+                expected_host: Some("bitbucket.org"),
+                expected_owner: "team",
+                expected_repo: "pkg",
+                expected_source: "git@bitbucket.org:team/pkg.git",
+            },
+        ];
+
+        for case in cases {
+            let resolved = crate::models::InstallTarget::from_raw(case.raw)
+                .resolve()
+                .expect("resolve target");
+            assert_eq!(resolved.plugin_repo.host.as_deref(), case.expected_host);
+            assert_eq!(resolved.plugin_repo.owner, case.expected_owner);
+            assert_eq!(resolved.plugin_repo.repo, case.expected_repo);
+            assert_eq!(resolved.source, case.expected_source);
+        }
     }
 
     #[test]
-    fn parses_https_remote() {
-        let repo = PluginRepo::from_remote_url("https://gitlab.com/owner/repo.git").unwrap();
-        assert_eq!(repo.host.as_deref(), Some("gitlab.com"));
-        assert_eq!(repo.owner, "owner");
-        assert_eq!(repo.repo, "repo");
-    }
+    fn plugin_spec_from_resolved_preserves_host_metadata() {
+        struct Case {
+            raw: &'static str,
+            expected_host: Option<&'static str>,
+            expected_owner: &'static str,
+            expected_repo: &'static str,
+            expect_repo_source: bool,
+        }
 
-    #[test]
-    fn normalizes_github_remotes_to_default_host() {
-        let repo = PluginRepo::from_remote_url("https://github.com/owner/repo").unwrap();
-        assert_eq!(repo.host.as_deref(), None);
-        assert_eq!(repo.as_str(), "owner/repo");
-    }
+        let cases = [
+            Case {
+                raw: "owner/repo",
+                expected_host: None,
+                expected_owner: "owner",
+                expected_repo: "repo",
+                expect_repo_source: true,
+            },
+            Case {
+                raw: "gitlab.com/owner/repo",
+                expected_host: Some("gitlab.com"),
+                expected_owner: "owner",
+                expected_repo: "repo",
+                expect_repo_source: true,
+            },
+            Case {
+                raw: "https://gitlab.com/owner/repo.git",
+                expected_host: Some("gitlab.com"),
+                expected_owner: "owner",
+                expected_repo: "repo",
+                expect_repo_source: false,
+            },
+            Case {
+                raw: "git@bitbucket.org:team/pkg.git",
+                expected_host: Some("bitbucket.org"),
+                expected_owner: "team",
+                expected_repo: "pkg",
+                expect_repo_source: false,
+            },
+        ];
 
-    #[test]
-    fn parses_scp_like_remote() {
-        let repo = PluginRepo::from_remote_url("git@bitbucket.org:team/pkg.git").unwrap();
-        assert_eq!(repo.host.as_deref(), Some("bitbucket.org"));
-        assert_eq!(repo.owner, "team");
-        assert_eq!(repo.repo, "pkg");
+        for case in cases {
+            let resolved = crate::models::InstallTarget::from_raw(case.raw)
+                .resolve()
+                .expect("resolve target");
+            let spec = PluginSpec::from_resolved(&resolved);
+            match spec.source {
+                PluginSource::Repo { repo, .. } => {
+                    assert!(
+                        case.expect_repo_source,
+                        "expected Repo source for {}",
+                        case.raw
+                    );
+                    assert_eq!(repo.host.as_deref(), case.expected_host);
+                    assert_eq!(repo.owner, case.expected_owner);
+                    assert_eq!(repo.repo, case.expected_repo);
+                }
+                PluginSource::Url { url, .. } => {
+                    assert!(
+                        !case.expect_repo_source,
+                        "expected Url source for {}",
+                        case.raw
+                    );
+                    assert_eq!(url, resolved.source);
+                }
+                other => panic!("unexpected source variant for {}: {other:?}", case.raw),
+            }
+        }
     }
 }
 
