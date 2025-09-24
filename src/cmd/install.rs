@@ -78,6 +78,20 @@ fn emit_event(plugin: &Plugin, event: &utils::Event) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn ensure_repo_parent(repo_path: &path::Path) -> anyhow::Result<()> {
+    if let Some(parent) = repo_path.parent()
+        && !parent.exists()
+    {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create parent directory for {}",
+                repo_path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
 fn add_plugins_to_config(
     config: &mut config::Config,
     config_path: &path::Path,
@@ -149,6 +163,15 @@ async fn clone_plugins(
                         files: vec![],
                     };
                     new_lock_plugins.lock().await.push(new_plugin);
+                    return;
+                }
+
+                if let Err(e) = ensure_repo_parent(&repo_path) {
+                    warn!(
+                        "Failed to prepare parent directory for {}: {:?}",
+                        repo_path.display(),
+                        e
+                    );
                     return;
                 }
 
@@ -374,6 +397,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 let repo = if is_local_source {
                     None
                 } else {
+                    ensure_repo_parent(&repo_path)?;
                     Some(
                         git::clone_repository(&source_base, &repo_path).with_context(|| {
                             format!(
@@ -474,6 +498,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     );
                     "local".to_string()
                 } else {
+                    ensure_repo_parent(&repo_path)?;
                     let repo = git::clone_repository(&source_base, &repo_path)?;
                     let sel = resolver::selection_from_ref_kind(&ref_kind);
                     match git::resolve_selection(&repo, &sel) {
@@ -659,6 +684,7 @@ mod tests {
                     name: None,
                     source: PluginSource::Repo {
                         repo: PluginRepo {
+                            host: None,
                             owner: "owner".to_string(),
                             repo: "new-repo".to_string(),
                         },
@@ -672,6 +698,7 @@ mod tests {
                     name: None,
                     source: PluginSource::Repo {
                         repo: PluginRepo {
+                            host: None,
                             owner: "owner".to_string(),
                             repo: "added-repo".to_string(),
                         },
@@ -778,6 +805,7 @@ mod tests {
     fn test_handle_existing_repository_with_force() {
         let test_env = TestEnvironmentSetup::new();
         let repo = PluginRepo {
+            host: None,
             owner: "owner".to_string(),
             repo: "repo".to_string(),
         };
@@ -793,6 +821,7 @@ mod tests {
     fn test_repository_handling_without_force() {
         let test_env = TestEnvironmentSetup::new();
         let repo = PluginRepo {
+            host: None,
             owner: "owner".to_string(),
             repo: "repo".to_string(),
         };
@@ -823,6 +852,7 @@ mod tests {
         let remote_url = format!("file://{}", remote_repo_path.display());
 
         let plugin_repo = PluginRepo {
+            host: None,
             owner: "owner".to_string(),
             repo: "force-repo".to_string(),
         };

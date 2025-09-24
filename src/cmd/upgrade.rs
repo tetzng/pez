@@ -246,6 +246,7 @@ mod tests {
         origin.set_head("refs/heads/main").unwrap();
 
         let repo = PluginRepo {
+            host: None,
             owner: "owner".into(),
             repo: "pkg".into(),
         };

@@ -88,7 +88,7 @@ impl Config {
     pub(crate) fn ensure_plugin_for_repo(&mut self, plugin_repo: &PluginRepo) -> bool {
         let resolved = ResolvedInstallTarget {
             plugin_repo: plugin_repo.clone(),
-            source: format!("https://github.com/{}", plugin_repo.as_str()),
+            source: plugin_repo.default_remote_source(),
             ref_kind: crate::resolver::RefKind::None,
             is_local: false,
         };
@@ -113,7 +113,9 @@ impl PluginSpec {
         match &self.source {
             PluginSource::Repo { repo, .. } => Ok(repo.clone()),
             PluginSource::Url { url, .. } => {
-                // Parse last two segments from URL path
+                if let Some(repo) = crate::models::PluginRepo::from_remote_url(url) {
+                    return Ok(repo);
+                }
                 let repo_name = url
                     .trim_end_matches('/')
                     .trim_end_matches(".git")
@@ -128,6 +130,7 @@ impl PluginSpec {
                     .unwrap_or("owner")
                     .to_string();
                 Ok(crate::models::PluginRepo {
+                    host: None,
                     owner,
                     repo: repo_name,
                 })
@@ -140,6 +143,7 @@ impl PluginSpec {
                     .ok_or_else(|| anyhow::anyhow!("Invalid local path: {expanded}"))?
                     .to_string();
                 Ok(crate::models::PluginRepo {
+                    host: None,
                     owner: "local".to_string(),
                     repo: name,
                 })
@@ -158,7 +162,7 @@ impl PluginSpec {
                 tag,
                 commit,
             } => {
-                let src = format!("https://github.com/{}", plugin_repo.as_str());
+                let src = plugin_repo.default_remote_source();
                 let refspec = pick_single_ref(version, branch, tag, commit)?;
                 Ok(crate::models::ResolvedInstallTarget {
                     plugin_repo,
@@ -209,7 +213,7 @@ impl PluginSpec {
                 path: resolved.source.clone(),
             }
         } else {
-            let default_source = format!("https://github.com/{}", resolved.plugin_repo.as_str());
+            let default_source = resolved.plugin_repo.default_remote_source();
             if resolved.source == default_source {
                 ref_kind_to_repo_source(&resolved.plugin_repo, &resolved.ref_kind)
             } else {
@@ -229,6 +233,7 @@ mod internal_tests {
     fn repo_to_resolved_latest() {
         let s = PluginSource::Repo {
             repo: crate::models::PluginRepo {
+                host: None,
                 owner: "o".into(),
                 repo: "r".into(),
             },
@@ -281,6 +286,7 @@ mod internal_tests {
     fn one_of_rule_enforced() {
         let s = PluginSource::Repo {
             repo: crate::models::PluginRepo {
+                host: None,
                 owner: "o".into(),
                 repo: "r".into(),
             },
@@ -301,6 +307,7 @@ mod internal_tests {
     fn from_resolved_builds_repo_spec() {
         let resolved = ResolvedInstallTarget {
             plugin_repo: PluginRepo {
+                host: None,
                 owner: "o".into(),
                 repo: "r".into(),
             },
@@ -334,6 +341,7 @@ mod internal_tests {
     fn from_resolved_builds_url_spec() {
         let resolved = ResolvedInstallTarget {
             plugin_repo: PluginRepo {
+                host: Some("gitlab.com".into()),
                 owner: "o".into(),
                 repo: "r".into(),
             },
@@ -345,20 +353,22 @@ mod internal_tests {
         let spec = PluginSpec::from_resolved(&resolved);
 
         match spec.source {
-            PluginSource::Url {
-                url,
+            PluginSource::Repo {
+                repo,
                 tag,
                 version,
                 branch,
                 commit,
             } => {
-                assert_eq!(url, "https://gitlab.com/o/r");
+                assert_eq!(repo.host.as_deref(), Some("gitlab.com"));
+                assert_eq!(repo.owner, "o");
+                assert_eq!(repo.repo, "r");
                 assert_eq!(tag.as_deref(), Some("v1.0.0"));
                 assert!(version.is_none());
                 assert!(branch.is_none());
                 assert!(commit.is_none());
             }
-            other => panic!("expected url source, got {other:?}"),
+            other => panic!("expected repo source, got {other:?}"),
         }
     }
 
@@ -366,6 +376,7 @@ mod internal_tests {
     fn from_resolved_builds_path_spec() {
         let resolved = ResolvedInstallTarget {
             plugin_repo: PluginRepo {
+                host: None,
                 owner: "local".into(),
                 repo: "tool".into(),
             },
@@ -387,6 +398,7 @@ mod internal_tests {
         let mut config = Config { plugins: None };
         let resolved = ResolvedInstallTarget {
             plugin_repo: PluginRepo {
+                host: None,
                 owner: "o".into(),
                 repo: "r".into(),
             },
@@ -405,6 +417,7 @@ mod internal_tests {
     fn ensure_plugin_for_repo_inserts_default_spec() {
         let mut config = Config { plugins: None };
         let repo = PluginRepo {
+            host: None,
             owner: "o".into(),
             repo: "r".into(),
         };
@@ -501,6 +514,7 @@ mod tests {
     fn repo_to_resolved_latest() {
         let s = PluginSource::Repo {
             repo: crate::models::PluginRepo {
+                host: None,
                 owner: "o".into(),
                 repo: "r".into(),
             },
@@ -553,6 +567,7 @@ mod tests {
     fn one_of_rule_enforced() {
         let s = PluginSource::Repo {
             repo: crate::models::PluginRepo {
+                host: None,
                 owner: "o".into(),
                 repo: "r".into(),
             },

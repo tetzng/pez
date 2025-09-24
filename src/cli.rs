@@ -217,10 +217,8 @@ impl InstallTarget {
                 .and_then(|s| s.to_str())
                 .ok_or_else(|| anyhow::anyhow!("Invalid local path: {path_str}"))?
                 .to_string();
-            let plugin_repo = PluginRepo {
-                owner: "local".to_string(),
-                repo: plugin_name,
-            };
+            let plugin_repo = PluginRepo::new(None, "local".to_string(), plugin_name)
+                .map_err(|e| anyhow::anyhow!(e))?;
             return Ok(ResolvedInstallTarget {
                 plugin_repo,
                 source: path_str,
@@ -232,17 +230,22 @@ impl InstallTarget {
         // Full URL (leave as-is; no @ref parsing to avoid ssh user@host conflict)
         if has_scheme {
             let url = raw.to_string();
-            // Try to infer owner/repo from path for naming; otherwise fall back to the last segment
+            if let Some(plugin_repo) = PluginRepo::from_remote_url(&url) {
+                return Ok(ResolvedInstallTarget {
+                    plugin_repo,
+                    source: url,
+                    ref_kind: crate::resolver::RefKind::None,
+                    is_local: false,
+                });
+            }
             let repo_name = url
                 .rsplit('/')
                 .next()
                 .map(|s| s.trim_end_matches(".git"))
                 .unwrap_or("repo")
                 .to_string();
-            let plugin_repo = PluginRepo {
-                owner: "url".to_string(),
-                repo: repo_name,
-            };
+            let plugin_repo = PluginRepo::new(None, "url".to_string(), repo_name)
+                .map_err(|e| anyhow::anyhow!(e))?;
             return Ok(ResolvedInstallTarget {
                 plugin_repo,
                 source: url,
@@ -262,8 +265,8 @@ impl InstallTarget {
             // owner/repo -> default host github.com
             let owner = parts[0].to_string();
             let repo = parts[1].to_string();
-            let plugin_repo = PluginRepo { owner, repo };
-            let source = format!("https://github.com/{}", plugin_repo.as_str());
+            let plugin_repo = PluginRepo::new(None, owner, repo).map_err(|e| anyhow::anyhow!(e))?;
+            let source = plugin_repo.default_remote_source();
             return Ok(ResolvedInstallTarget {
                 plugin_repo,
                 source,
@@ -275,8 +278,9 @@ impl InstallTarget {
             let host = parts[0];
             let owner = parts[1].to_string();
             let repo = parts[2].to_string();
-            let plugin_repo = PluginRepo { owner, repo };
-            let source = format!("https://{host}/{}", plugin_repo.as_str());
+            let plugin_repo = PluginRepo::new(Some(host.to_string()), owner, repo)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            let source = format!("https://{}/{}", host, plugin_repo.owner_repo_path());
             return Ok(ResolvedInstallTarget {
                 plugin_repo,
                 source,
@@ -302,6 +306,7 @@ mod tests {
         let t: InstallTarget = "o/r".parse().unwrap();
         let r = t.resolve().unwrap();
         assert_eq!(r.plugin_repo.as_str(), "o/r");
+        assert_eq!(r.plugin_repo.host.as_deref(), None);
         assert_eq!(r.source, "https://github.com/o/r");
         assert!(!r.is_local);
 
@@ -318,11 +323,28 @@ mod tests {
         let t: InstallTarget = "gitlab.com/o/r@branch:dev".parse().unwrap();
         let r = t.resolve().unwrap();
         assert_eq!(r.source, "https://gitlab.com/o/r");
+        assert_eq!(r.plugin_repo.host.as_deref(), Some("gitlab.com"));
+        assert_eq!(r.plugin_repo.as_str(), "gitlab.com/o/r");
         matches!(r.ref_kind, crate::resolver::RefKind::Branch(_));
 
         let t: InstallTarget = "https://example.com/o/r".parse().unwrap();
         let r = t.resolve().unwrap();
         assert_eq!(r.source, "https://example.com/o/r");
+        assert_eq!(r.plugin_repo.host.as_deref(), Some("example.com"));
+        assert_eq!(r.plugin_repo.as_str(), "example.com/o/r");
+        matches!(r.ref_kind, crate::resolver::RefKind::None);
+
+        let t: InstallTarget = "https://github.com/o/r".parse().unwrap();
+        let r = t.resolve().unwrap();
+        assert_eq!(r.plugin_repo.host.as_deref(), None);
+        assert_eq!(r.plugin_repo.as_str(), "o/r");
+        assert_eq!(r.source, "https://github.com/o/r");
+
+        let t: InstallTarget = "git@bitbucket.org:o/r.git".parse().unwrap();
+        let r = t.resolve().unwrap();
+        assert_eq!(r.plugin_repo.host.as_deref(), Some("bitbucket.org"));
+        assert_eq!(r.plugin_repo.as_str(), "bitbucket.org/o/r");
+        assert_eq!(r.source, "git@bitbucket.org:o/r.git");
         matches!(r.ref_kind, crate::resolver::RefKind::None);
 
         // local path

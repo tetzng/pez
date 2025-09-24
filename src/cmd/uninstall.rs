@@ -222,6 +222,7 @@ owner/plugin-a
 
         // Create config with one plugin spec
         let repo = PluginRepo {
+            host: None,
             owner: "owner".into(),
             repo: "pkg".into(),
         };
@@ -249,7 +250,7 @@ owner/plugin-a
         let plugin = crate::lock_file::Plugin {
             name: "pkg".into(),
             repo: repo.clone(),
-            source: format!("https://github.com/{}", repo.as_str()),
+            source: repo.default_remote_source(),
             commit_sha: "abc1234".into(),
             files: vec![PluginFile {
                 dir: TargetDir::Functions,
@@ -312,6 +313,7 @@ owner/plugin-a
         let prev_pt = std::env::var_os("PEZ_TARGET_DIR");
 
         let repo = PluginRepo {
+            host: None,
             owner: "owner".into(),
             repo: "alt".into(),
         };
@@ -351,7 +353,7 @@ owner/plugin-a
             plugins: vec![crate::lock_file::Plugin {
                 name: "alt".into(),
                 repo: repo.clone(),
-                source: format!("https://github.com/{}", repo.as_str()),
+                source: repo.default_remote_source(),
                 commit_sha: "abc1234".into(),
                 files: vec![PluginFile {
                     dir: TargetDir::Functions,
@@ -406,6 +408,7 @@ owner/plugin-a
 
         // Create config with one plugin and lockfile with one file entry
         let repo = PluginRepo {
+            host: None,
             owner: "owner".into(),
             repo: "missing".into(),
         };
@@ -426,7 +429,7 @@ owner/plugin-a
             plugins: vec![crate::lock_file::Plugin {
                 name: "missing".into(),
                 repo: repo.clone(),
-                source: format!("https://github.com/{}", repo.as_str()),
+                source: repo.default_remote_source(),
                 commit_sha: "abc1234".into(),
                 files: vec![PluginFile {
                     dir: TargetDir::Functions,
