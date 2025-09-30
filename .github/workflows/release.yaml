@@ -50,6 +50,9 @@ jobs:
               extension: ".exe",
             }
 
+    env:
+      CARGO_TARGET_DIR: target/${{ matrix.job.target }}
+
     defaults:
       run:
         shell: bash
@@ -65,6 +68,9 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> ${{ env.CARGO_TARGET_DIR }}
+          key: ${{ runner.os }}-${{ matrix.job.target }}
 
       - name: Install cross (only when needed)
         if: ${{ matrix.job.use-cross == true }}
@@ -84,7 +90,7 @@ jobs:
           set -euxo pipefail
           mkdir -p dist
           BIN="${PROJECT_NAME}${{ matrix.job.extension }}"
-          SRC="target/${{ matrix.job.target }}/release/${BIN}"
+          SRC="${CARGO_TARGET_DIR}/${{ matrix.job.target }}/release/${BIN}"
           OUT="${PROJECT_NAME}-${GITHUB_REF_NAME}-${{ matrix.job.target }}${{ matrix.job.extension }}"
           cp "$SRC" "dist/$OUT"
 
