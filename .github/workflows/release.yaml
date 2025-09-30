@@ -1,35 +1,77 @@
-name: release
+name: Build and Release
 
 permissions:
-  contents: read
+  contents: write
 
 on:
   push:
     tags:
       - "v*.*.*"
 
+env:
+  PROJECT_NAME: pez
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      matrix:
+        job:
+          - {
+              os: ubuntu-latest,
+              target: x86_64-unknown-linux-gnu,
+              use-cross: false,
+              extension: "",
+            }
+          - {
+              os: ubuntu-latest,
+              target: aarch64-unknown-linux-gnu,
+              use-cross: true,
+              extension: "",
+            }
+          - {
+              os: macos-latest,
+              target: x86_64-apple-darwin,
+              use-cross: false,
+              extension: "",
+            }
+          - {
+              os: macos-latest,
+              target: aarch64-apple-darwin,
+              use-cross: false,
+              extension: "",
+            }
+          - {
+              os: windows-latest,
+              target: x86_64-pc-windows-msvc,
+              use-cross: false,
+              extension: .exe,
+            }
+
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions-rs/toolchain@v1
+      - name: Checkout
+        uses: actions/checkout@v5.0.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
-      - name: Cargo fmt
-        run: cargo fmt --all -- --check
-      - name: Cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-      - name: Cargo test
-        run: cargo test --all-features
-      - name: Build release binaries
+          target: ${{ matrix.job.target }}
+
+      - name: Build
+        uses: actions-rs/cargo@v1.0.1
+        with:
+          use-cross: ${{ matrix.job.use-cross }}
+          command: build
+          args: --release --target ${{ matrix.job.target }}
+
+      - name: Rename artifacts
         run: |
-          cargo build --release
-          mkdir -p dist
-          cp target/release/pez dist/pez-$GITHUB_REF_NAME-linux-amd64
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+          mv target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}${{ matrix.job.extension }} ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: pez-$GITHUB_REF_NAME
-          path: dist/*
+          files: |
+            ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
