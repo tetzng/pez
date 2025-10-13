@@ -1,6 +1,6 @@
 [package]
 name = "pez"
-version = "0.3.4"
+version = "0.3.5"
 edition = "2024"
 description = "A Rust-based plugin manager for fish."
 homepage = "https://github.com/tetzng/pez"
