@@ -79,6 +79,7 @@ Global options
 
 - Import from fisher’s `fish_plugins` into `pez.toml`.
 - By default the command merges new repos into the existing `pez.toml`, skipping duplicates, ignoring comments/blank lines, and omitting the `jorgebucaran/fisher` entry itself.
+- Pinned refs such as `owner/repo@2.0.0`, `owner/repo@tag:v1`, or `host/owner/repo@branch:main` are preserved; if an entry was already pinned in `pez.toml`, migrating to a different ref updates it, while unpinned incoming entries leave the existing pin untouched. URL-based entries that append `@ref` as part of the URL or lines with an empty suffix (e.g. `owner/repo@`) are ignored to avoid writing invalid specs—convert them to `owner/repo@ref` form before migrating.
 - `--dry-run` prints the planned additions without modifying any files.
 - `--force` replaces the existing plugin list with the migrated entries instead of merging.
 - `--install` triggers `pez install` for the migrated entries after they are written (skipped when `--dry-run` is set).
