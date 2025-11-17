@@ -6,6 +6,8 @@
   <em>Experimental</em> — use at your own risk.
 </p>
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/tetzng/pez)
+
 ## Installation
 
 Ensure you have Rust installed on your system. You can install pez using Cargo:
