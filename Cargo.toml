@@ -12,7 +12,7 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
-console = "0.16.1"
+console = "0.16.2"
 git2 = { version = "0.20.3", features = [ "vendored-libgit2", "vendored-openssl" ] }
 serde = "1.0.228"
 serde_derive = "1.0.216"
