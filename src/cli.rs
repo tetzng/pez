@@ -54,6 +54,9 @@ pub(crate) enum Commands {
         shell: ShellType,
     },
 
+    /// Output shell activation code
+    Activate(ActivateArgs),
+
     /// Diagnose common setup issues
     Doctor(DoctorArgs),
 
@@ -163,6 +166,15 @@ pub(crate) enum FilesFormat {
     Json,
 }
 
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum FilesFrom {
+    Install,
+    Update,
+    Upgrade,
+    Uninstall,
+    Remove,
+}
+
 #[derive(Args, Debug, Clone)]
 pub(crate) struct FilesArgs {
     /// Plugin identifiers (owner/repo, host/owner/repo, URL, or with @ref)
@@ -179,6 +191,21 @@ pub(crate) struct FilesArgs {
     /// Output format (paths or json)
     #[arg(long, value_enum, default_value = "paths")]
     pub(crate) format: FilesFormat,
+
+    /// Derive target plugins by parsing argv for a subcommand (install/update/upgrade/uninstall/remove)
+    #[arg(long, value_enum)]
+    pub(crate) from: Option<FilesFrom>,
+
+    /// Arguments intended for the subcommand when using --from (captured after --)
+    #[arg(last = true)]
+    pub(crate) passthrough: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct ActivateArgs {
+    /// Target shell for activation code
+    #[arg(value_enum)]
+    pub(crate) shell: ShellType,
 }
 
 #[derive(Args, Debug)]
