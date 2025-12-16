@@ -334,6 +334,12 @@ impl fmt::Display for Event {
 }
 
 pub(crate) fn emit_event(file_name_or_path: &str, event: &Event) -> anyhow::Result<()> {
+    // Allow callers (e.g., fish wrapper) to suppress out-of-process emits to
+    // avoid duplicate hooks when the shell itself handles events in-process.
+    if std::env::var_os("PEZ_SUPPRESS_EMIT").is_some() {
+        return Ok(());
+    }
+
     let stem_opt = path::Path::new(file_name_or_path)
         .file_stem()
         .and_then(|s| s.to_str());

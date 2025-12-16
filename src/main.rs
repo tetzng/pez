@@ -68,6 +68,9 @@ async fn main() -> anyhow::Result<()> {
         cli::Commands::Migrate(args) => {
             cmd::migrate::run(args).await?;
         }
+        cli::Commands::Files(args) => {
+            cmd::files::run(args)?;
+        }
         cli::Commands::Completions { shell } => match shell {
             cli::ShellType::Fish => cmd::completion::generate_completion(clap_complete::aot::Fish),
         },

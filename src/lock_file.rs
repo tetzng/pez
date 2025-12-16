@@ -1,5 +1,6 @@
 use crate::{models::PluginRepo, models::TargetDir};
 
+use anyhow::anyhow;
 use serde_derive::{Deserialize, Serialize};
 use std::{fs, path};
 use tracing::error;
@@ -90,6 +91,22 @@ impl LockFile {
             self.add_plugin(plugin)
         }
     }
+
+    pub(crate) fn paths_for_repos(
+        &self,
+        repos: &[PluginRepo],
+        config_dir: &path::Path,
+        dir_filter: Option<&TargetDir>,
+    ) -> anyhow::Result<Vec<path::PathBuf>> {
+        let mut out = Vec::new();
+        for repo in repos {
+            let plugin = self
+                .get_plugin_by_repo(repo)
+                .ok_or_else(|| anyhow!("Plugin is not installed: {}", repo.as_str()))?;
+            out.extend(plugin.resolve_paths(config_dir, dir_filter));
+        }
+        Ok(out)
+    }
 }
 
 pub(crate) const AUTO_GENERATED_COMMENT: &str =
@@ -118,6 +135,18 @@ impl Plugin {
         } else {
             self.name.clone()
         }
+    }
+
+    pub(crate) fn resolve_paths(
+        &self,
+        config_dir: &path::Path,
+        dir_filter: Option<&TargetDir>,
+    ) -> Vec<path::PathBuf> {
+        self.files
+            .iter()
+            .filter(|f| dir_filter.is_none_or(|d| &f.dir == d))
+            .map(|f| f.get_path(config_dir))
+            .collect()
     }
 }
 
