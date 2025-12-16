@@ -59,6 +59,9 @@ pub(crate) enum Commands {
 
     /// Migrate from fisher (reads fish_plugins)
     Migrate(MigrateArgs),
+
+    /// List installed files for plugins
+    Files(FilesArgs),
 }
 
 #[derive(Args, Debug)]
@@ -142,6 +145,40 @@ pub(crate) enum ListFilter {
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub(crate) enum ShellType {
     Fish,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum FilesDir {
+    #[value(name = "conf.d")]
+    ConfD,
+    #[value(name = "all")]
+    All,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum FilesFormat {
+    #[value(name = "paths")]
+    Paths,
+    #[value(name = "json")]
+    Json,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(crate) struct FilesArgs {
+    /// Plugin identifiers (owner/repo, host/owner/repo, URL, or with @ref)
+    pub(crate) plugins: Option<Vec<String>>,
+
+    /// List files for all installed plugins
+    #[arg(long)]
+    pub(crate) all: bool,
+
+    /// Filter by destination directory (conf.d or all)
+    #[arg(long, value_enum, default_value = "all")]
+    pub(crate) dir: FilesDir,
+
+    /// Output format (paths or json)
+    #[arg(long, value_enum, default_value = "paths")]
+    pub(crate) format: FilesFormat,
 }
 
 #[derive(Args, Debug)]
