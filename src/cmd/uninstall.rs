@@ -45,7 +45,9 @@ fn normalize_plugins(plugins: &mut Vec<PluginRepo>) {
     plugins.retain(|repo| seen.insert(repo.as_str()));
 }
 
-fn read_plugins_from_reader<R: io::Read>(mut reader: R) -> anyhow::Result<Vec<PluginRepo>> {
+pub(crate) fn read_plugins_from_reader<R: io::Read>(
+    mut reader: R,
+) -> anyhow::Result<Vec<PluginRepo>> {
     let mut buf = String::new();
     reader.read_to_string(&mut buf)?;
     let mut out = Vec::new();

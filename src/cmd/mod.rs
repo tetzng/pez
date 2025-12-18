@@ -1,3 +1,4 @@
+pub mod activate;
 pub mod completion;
 pub mod doctor;
 pub mod files;

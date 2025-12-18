@@ -71,6 +71,9 @@ async fn main() -> anyhow::Result<()> {
         cli::Commands::Files(args) => {
             cmd::files::run(args)?;
         }
+        cli::Commands::Activate(args) => match args.shell {
+            cli::ShellType::Fish => cmd::activate::run_fish(),
+        },
         cli::Commands::Completions { shell } => match shell {
             cli::ShellType::Fish => cmd::completion::generate_completion(clap_complete::aot::Fish),
         },
