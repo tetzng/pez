@@ -54,4 +54,4 @@ pez completions fish > ~/.config/fish/completions/pez.fish
 pez activate fish | source
 ```
 
-To persist, add it inside an interactive block in `~/.config/fish/config.fish`.
+To persist, add it inside an `if status is-interactive ... end` block in `~/.config/fish/config.fish`.

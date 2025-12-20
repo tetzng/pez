@@ -17,11 +17,11 @@ fn parse_jobs_override(raw: &str) -> Result<usize, String> {
 #[command(name = "pez", version, about, long_about = None)]
 pub(crate) struct Cli {
     /// Increase output verbosity (-v for info, -vv for debug)
-    #[arg(short, long, action = clap::ArgAction::Count)]
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub(crate) verbose: u8,
 
     /// Override job concurrency for explicit install clones, upgrade, uninstall, and prune (default: 4 when unset)
-    #[arg(long, value_name = "N", value_parser = parse_jobs_override)]
+    #[arg(long, value_name = "N", value_parser = parse_jobs_override, global = true)]
     pub(crate) jobs: Option<usize>,
 
     #[command(subcommand)]
@@ -430,6 +430,20 @@ mod tests {
         let cli = Cli::parse_from(["pez", "--jobs", "3", "list"]);
         assert_eq!(cli.jobs, Some(3));
         assert!(matches!(cli.command, Commands::List(_)));
+    }
+
+    #[test]
+    fn parse_verbose_after_subcommand() {
+        let cli = Cli::parse_from(["pez", "list", "-v"]);
+        assert_eq!(cli.verbose, 1);
+        assert!(matches!(cli.command, Commands::List(_)));
+    }
+
+    #[test]
+    fn parse_jobs_after_subcommand() {
+        let cli = Cli::parse_from(["pez", "install", "--jobs", "2"]);
+        assert_eq!(cli.jobs, Some(2));
+        assert!(matches!(cli.command, Commands::Install(_)));
     }
 
     #[test]
