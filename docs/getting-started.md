@@ -38,13 +38,13 @@ pez list --format table
 pez completions fish > ~/.config/fish/completions/pez.fish
 ```
 
-5) Optional: enable fish in-shell hooks (conf.d events)
+5) Optional: enable fish shell hooks (conf.d events) for the current shell
 
 ```shell
 pez activate fish | source
 ```
 
-To persist, add it inside an interactive block in `~/.config/fish/config.fish`.
+To persist, add it inside an `if status is-interactive ... end` block in `~/.config/fish/config.fish`.
 
 ### CLI usage (examples)
 
@@ -57,7 +57,7 @@ To persist, add it inside an interactive block in `~/.config/fish/config.fish`.
 | `pez upgrade` | Update non‑local plugins to remote HEAD | `pez upgrade` |
 | `pez list --outdated` | Show outdated plugins | `pez list --outdated --format json` |
 | `pez doctor` | Run diagnostics | `pez doctor --format json` |
-| `pez activate fish` | Enable fish in-shell hooks | `pez activate fish | source` |
+| `pez activate fish` | Enable fish shell hooks | `pez activate fish | source` |
 | `pez files --all` | List installed files | `pez files --all` |
 
 Key flag: `-v/--verbose` increases logging (`-vv` enables debug).

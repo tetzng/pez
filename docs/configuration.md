@@ -2,6 +2,18 @@
 
 This document describes the user‑facing configuration files used by pez.
 
+## Locations and Precedence
+
+- Config files (`pez.toml`, `pez-lock.toml`):
+  `PEZ_CONFIG_DIR` > `__fish_config_dir` > `XDG_CONFIG_HOME/fish` > `~/.config/fish`
+- Data directory (cloned repos):
+  `PEZ_DATA_DIR` > `__fish_user_data_dir/pez` > `XDG_DATA_HOME/fish/pez` > `~/.local/share/fish/pez`
+- Copy destination:
+  `PEZ_TARGET_DIR` > `__fish_config_dir` > `XDG_CONFIG_HOME/fish` > `~/.config/fish`
+
+`PEZ_TARGET_DIR` only affects where plugin files are copied; configuration and
+lock files always live under the config precedence above.
+
 ## pez.toml
 
 Define the plugins you want pez to manage. Each entry must specify exactly one
@@ -50,7 +62,7 @@ path = "~/path/to/local/plugin"   # absolute or ~/ only
 Notes
 
 - If a URL has no scheme, pez normalizes it to https (e.g., `gitlab.com/...`).
-- CLI‑provided relative paths are normalized to absolute paths when recorded.
+- CLI‑provided relative paths and `~/` are normalized to absolute paths when recorded.
 - `path` must resolve to an absolute path (either absolute or `~/…`).
 - Host-prefixed repos (e.g., `gitlab.com/owner/repo`) are recorded as-is and cloned under `<host>/<owner>/<repo>` inside the data directory. GitHub shorthand (`owner/repo`) continues to map to `github.com`.
 
@@ -83,6 +95,14 @@ Notes
 
 - For local sources, `commit_sha = "local"`. Such entries are skipped by
   `upgrade` and excluded from `list --outdated` comparisons.
+
+## Plugin Layout and Copy Rules
+
+- pez looks for top-level `functions`, `completions`, `conf.d`, and `themes` directories in each plugin repo.
+- It copies files recursively into the matching Fish config directories, preserving relative paths.
+- Only `.fish` files are copied from `functions`/`completions`/`conf.d`, and only `.theme` files from `themes`.
+- If two plugins would write the same destination path in a single run, the later plugin is skipped and its files are not recorded in the lockfile.
+- For `conf.d` files, pez emits `emit <stem>_{install|update|uninstall}` after installs/upgrades or before uninstalls (unless `PEZ_SUPPRESS_EMIT` is set).
 
 ## Environment Variables and CLI Overrides
 

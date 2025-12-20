@@ -1,17 +1,43 @@
 # Command Reference
 
-Global options
+## Contents
 
-- `-v, --verbose` Increase verbosity. Default is info; `-vv` enables debug.
-- `--jobs <N>` Override parallel job limit for commands that spawn concurrent tasks (defaults to 4; overrides `PEZ_JOBS`).
-- `-V, --version` Print version.
-- `-h, --help` Print help.
+- [Usage](#usage)
+- [Commands](#commands)
+  - [init](#init)
+  - [install](#install)
+  - [uninstall](#uninstall)
+  - [upgrade](#upgrade)
+  - [list](#list)
+  - [prune](#prune)
+  - [doctor](#doctor)
+  - [completions](#completions)
+  - [activate](#activate)
+  - [files](#files)
+  - [migrate](#migrate)
 
-## init
+## Usage
+
+```text
+pez [OPTIONS] <COMMAND>
+```
+
+Global options (apply to all commands)
+
+| Option | Description |
+| --- | --- |
+| `-v, --verbose` | Increase verbosity. Default is info; `-vv` enables debug. |
+| `--jobs <N>` | Override parallel job limit for commands that spawn concurrent tasks (defaults to 4; overrides `PEZ_JOBS`). |
+| `-V, --version` | Print version. |
+| `-h, --help` | Print help. |
+
+## Commands
+
+### init
 
 - Initialize `pez.toml` under the configuration directory. Fails if it already exists.
 
-## install
+### install
 
 - Install from CLI targets or from `pez.toml` (when no targets are given).
 - Targets: `owner/repo[@ref]`, `host/owner/repo[@ref]`, full URL, local paths (absolute, `~/`, or relative).
@@ -30,7 +56,7 @@ Global options
   - Clone path layout: remote repos live under `<host>/<owner>/<repo>` in the data directory. GitHub shorthand (`owner/repo`) continues to resolve to `github.com`.
   - With `--prune`, pez removes lockfile entries that are no longer declared in `pez.toml` after a successful install (similar to `pez prune`).
 
-## uninstall
+### uninstall
 
 - Remove the specified plugins (`owner/repo` or `host/owner/repo`). With `--stdin`, also read plugin repos from standard input (one per line).
 - Options:
@@ -40,7 +66,7 @@ Global options
 - Example:
   - `printf "owner/a\nowner/b\n" | pez uninstall --stdin`
 
-## upgrade
+### upgrade
 
 - Upgrade specified plugins (`owner/repo` or `host/owner/repo`), or with no arguments, upgrade plugins listed in `pez.toml`.
 - Respects selectors in `pez.toml` (`version`/`branch`/`tag`/`commit`). When no selector is set, updates to the latest commit on the remote default branch (remote HEAD).
@@ -48,7 +74,7 @@ Global options
 - Concurrency is controlled by `--jobs` or `PEZ_JOBS`.
 - Any repo specified on the CLI that is not already in `pez.toml` is added automatically so future installs remain in sync.
 
-## list
+### list
 
 - Show installed plugins recorded in `pez-lock.toml`.
 - Options:
@@ -61,30 +87,30 @@ Global options
   - json: `name`, `repo`, `source`, `selector`, `commit`
   - `list --outdated` (json/table): `name`, `repo`, `source`, `current`, `latest`
 
-## prune
+### prune
 
 - Remove plugins that exist only in the lockfile (i.e., not listed in `pez.toml`).
 - Options: `--dry-run`, `--yes`, `--force` (remove destination files even if the repo dir is missing).
 - Behavior: if `pez.toml` has no `[[plugins]]` entries (plugins list missing), the command warns and asks for confirmation unless `--yes` is provided.
 
-## doctor
+### doctor
 
 - Checks the configuration file, lockfile, data/config directories, and the set of copied files.
 - Reported checks include: `config`, `lock_file`, `fish_config_dir`, `pez_data_dir`, `repos` (missing clones), `target_files` (missing files), `duplicates` (conflicting destinations).
 - Options: `--format json`.
 
-## completions
+### completions
 
 - Generate completion script for Fish: `pez completions fish > ~/.config/fish/completions/pez.fish`
 
-## activate
+### activate
 
-- Output shell activation code that wraps `pez` with in-shell hooks.
+- Output shell activation code that wraps `pez` with hooks in the current shell.
 - Usage: `pez activate fish | source` (for persistence, add inside `if status is-interactive ... end` in `~/.config/fish/config.fish`).
 - Behavior: after `install`/`upgrade`, sources matching `conf.d` files and emits `<stem>_{install|update}` in the current shell; before `uninstall`, emits `<stem>_uninstall`.
 - When active, the wrapper runs `pez` with `PEZ_SUPPRESS_EMIT=1` to avoid duplicate out-of-process emits.
 
-## files
+### files
 
 - List installed files recorded in `pez-lock.toml`.
 - Plugin identifiers: `owner/repo`, `host/owner/repo`, or URLs; `@ref` suffixes are accepted for shorthand/host forms and ignored for lookup.
@@ -99,7 +125,7 @@ Global options
   - `pez files --from install -- owner/repo@v3`
   - `printf "owner/a\n" | pez files --from uninstall -- --stdin`
 
-## migrate
+### migrate
 
 - Import from fisher’s `fish_plugins` into `pez.toml`.
 - By default the command merges new repos into the existing `pez.toml`, skipping duplicates, ignoring comments/blank lines, and omitting the `jorgebucaran/fisher` entry itself.

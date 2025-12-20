@@ -4,6 +4,10 @@
 
 pez copies plugin files into your Fish config directory (`functions`, `completions`, `conf.d`, `themes`). See docs/configuration.md for directory precedence.
 
+### How is load order determined?
+
+pez only copies files into the Fish config directories; Fish determines when and how they are loaded. If you need a specific order, manage it in your Fish configuration.
+
 ### Where are plugin repos cloned?
 
 Under the pez data directory (by default `~/.local/share/fish/pez`). You can override via `PEZ_DATA_DIR`.
@@ -22,7 +26,7 @@ Use `pez files owner/repo` for a single plugin or `pez files --all` for everythi
 
 ### How do I run conf.d hooks in my current shell?
 
-Source the activation script: `pez activate fish | source`. For persistence, place it in `~/.config/fish/config.fish` inside `if status is-interactive ... end`. This wraps `pez` so `install`/`upgrade`/`uninstall` source the affected conf.d files and emit events in-shell.
+Source the activation script: `pez activate fish | source`. For persistence, place it in `~/.config/fish/config.fish` inside `if status is-interactive ... end`. This wraps `pez` so `install`/`upgrade`/`uninstall` source the affected conf.d files and emit events in the current shell.
 
 ### How do I uninstall everything not in pez.toml?
 
