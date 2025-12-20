@@ -37,7 +37,7 @@ pez init
 #
 #    # [[plugins]]
 #    # path = "~/path/to/local/plugin"       # Local directory (absolute or ~/ only)
-#    # Note: when specifying a relative path at the CLI (e.g., ./plugin), pez normalizes it to an absolute path in pez.toml.
+#    # Note: when specifying a relative path or ~/ at the CLI (e.g., ./plugin), pez normalizes it to an absolute path in pez.toml.
 
 # 3) Install plugins listed in pez.toml
 pez install
@@ -47,6 +47,9 @@ pez list --format table
 
 # 5) (Optional) Enable completions for pez itself
 pez completions fish > ~/.config/fish/completions/pez.fish
+
+# 6) (Optional) Activate fish shell hooks (emit conf.d events in the current shell)
+pez activate fish | source
 ```
 
 ## Shell Completions
@@ -54,6 +57,15 @@ pez completions fish > ~/.config/fish/completions/pez.fish
 ```fish
 pez completions fish > ~/.config/fish/completions/pez.fish
 ```
+
+## Shell Activation
+
+```fish
+# Enable in-shell conf.d events for install/upgrade/uninstall
+pez activate fish | source
+```
+
+For persistence, add it inside an interactive block in `~/.config/fish/config.fish`.
 
 ## Docs & FAQ
 
@@ -72,10 +84,11 @@ pez completions fish > ~/.config/fish/completions/pez.fish
 Usage: pez [OPTIONS] <COMMAND>
 
 Commands:
-  init | install | uninstall | upgrade | list | prune | completions | doctor | migrate
+  init | install | uninstall | upgrade | list | prune | completions | activate | doctor | migrate | files
 
 Options:
   -v, --verbose  Increase output verbosity (-v for info, -vv for debug)
+  --jobs <N>     Override parallel job limit (default: 4; overrides PEZ_JOBS)
   -h, --help     Print help
   -V, --version  Print version
 ```

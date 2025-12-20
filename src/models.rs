@@ -410,8 +410,8 @@ mod tests {
 /// - `owner/repo`
 /// - `owner/repo@v3`
 /// - `gitlab.com/owner/repo`
-/// - `gitlab.com/owner/repo@branch`
-/// - <https://example.com/owner/repo>
+/// - `gitlab.com/owner/repo@branch:main`
+/// - `https://example.com/owner/repo`
 /// - `~/path/to/repo` or `./relative/path`
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(try_from = "String", into = "String")]

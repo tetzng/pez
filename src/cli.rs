@@ -20,7 +20,7 @@ pub(crate) struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub(crate) verbose: u8,
 
-    /// Override job concurrency for clone/upgrade/prune operations (default: 4 when unset)
+    /// Override job concurrency for explicit install clones, upgrade, uninstall, and prune (default: 4 when unset)
     #[arg(long, value_name = "N", value_parser = parse_jobs_override)]
     pub(crate) jobs: Option<usize>,
 
@@ -69,7 +69,7 @@ pub(crate) enum Commands {
 
 #[derive(Args, Debug)]
 pub(crate) struct InstallArgs {
-    /// Plugin sources: `owner/repo[@ref]`, `host/owner/repo[@ref]`, full URL, or local path
+    /// Plugin sources: `owner/repo[@ref]`, `host/owner/repo[@ref]`, full URL, or local path (absolute, ~/, ./, ../)
     pub(crate) plugins: Option<Vec<crate::models::InstallTarget>>,
 
     /// Force install even if the plugin is already installed
@@ -83,7 +83,7 @@ pub(crate) struct InstallArgs {
 
 #[derive(Args, Debug)]
 pub(crate) struct UninstallArgs {
-    /// GitHub repo in the format `owner/repo`
+    /// Repo in the format `owner/repo` or `host/owner/repo`
     pub(crate) plugins: Option<Vec<crate::models::PluginRepo>>,
 
     /// Force uninstall even if the plugin data directory does not exist
@@ -97,7 +97,7 @@ pub(crate) struct UninstallArgs {
 
 #[derive(Args, Debug)]
 pub(crate) struct UpgradeArgs {
-    /// GitHub repo in the format `owner/repo`
+    /// Repo in the format `owner/repo` or `host/owner/repo`
     pub(crate) plugins: Option<Vec<crate::models::PluginRepo>>,
 }
 
@@ -177,7 +177,7 @@ pub(crate) enum FilesFrom {
 
 #[derive(Args, Debug, Clone)]
 pub(crate) struct FilesArgs {
-    /// Plugin identifiers (owner/repo, host/owner/repo, URL, or with @ref)
+    /// Plugin identifiers (owner/repo, host/owner/repo, or URL; @ref accepted for shorthand/host forms)
     pub(crate) plugins: Option<Vec<String>>,
 
     /// List files for all installed plugins

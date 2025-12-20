@@ -106,7 +106,7 @@ impl PluginSpec {
     }
 
     /// Derive a PluginRepo (owner/repo) for use as a stable identifier and data dir name.
-    /// - Github: uses provided owner/repo
+    /// - GitHub: uses provided owner/repo
     /// - Git URL: attempts to parse last two path segments as owner/repo
     /// - Path: owner = "local", repo = basename of path
     pub(crate) fn get_plugin_repo(&self) -> anyhow::Result<crate::models::PluginRepo> {

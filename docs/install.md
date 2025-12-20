@@ -47,3 +47,11 @@ cargo build --release
 ```shell
 pez completions fish > ~/.config/fish/completions/pez.fish
 ```
+
+### Shell activation
+
+```shell
+pez activate fish | source
+```
+
+To persist, add it inside an interactive block in `~/.config/fish/config.fish`.

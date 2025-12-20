@@ -16,9 +16,17 @@ Under the pez data directory (by default `~/.local/share/fish/pez`). You can ove
 
 - Duplicate destination paths are detected for both CLI targets and installs from `pez.toml`. Conflicting plugins are skipped with a warning to avoid overwriting existing files.
 
+### How do I list the files installed by a plugin?
+
+Use `pez files owner/repo` for a single plugin or `pez files --all` for everything. Add `--dir conf.d` to filter to conf.d scripts.
+
+### How do I run conf.d hooks in my current shell?
+
+Source the activation script: `pez activate fish | source`. For persistence, place it in `~/.config/fish/config.fish` inside `if status is-interactive ... end`. This wraps `pez` so `install`/`upgrade`/`uninstall` source the affected conf.d files and emit events in-shell.
+
 ### How do I uninstall everything not in pez.toml?
 
-Run `pez prune`. Use `--dry-run` to preview and `--yes` to skip confirmation when `pez.toml` is empty.
+Run `pez prune`. Use `--dry-run` to preview and `--yes` to skip confirmation when `pez.toml` has no `[[plugins]]` entries.
 
 ### How do I use a local plugin?
 
@@ -26,4 +34,4 @@ Add `[[plugins]] path = "~/path/to/plugin"`. Local sources are not upgraded and 
 
 ### I installed the same repo twice with a different name — is that supported?
 
-The lockfile deduplicates by repo/name. Prefer a single install per repo. If you need a custom display name, set `name = "..."` in the plugin spec.
+Not supported: `pez.toml` entries are unique by repo, and the lockfile also enforces unique source/name. Prefer a single install per repo. If you need a custom display name, set `name = "..."` in the plugin spec.
