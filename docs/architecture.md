@@ -13,6 +13,8 @@ This document outlines the high‑level structure and flows in pez.
   - `git.rs`: resolve selections against a repo (branches/tags/commits), list tags.
   - `utils.rs`: path/env resolution, copy routines, events, helpers.
   - `cmd/*`: end‑user commands orchestrating core modules.
+    - `cmd/activate.rs`: emits Fish wrapper code to run hooks in-shell.
+    - `cmd/files.rs`: lists installed file paths from the lockfile (used by activation).
 
 ## Data Flow (install)
 

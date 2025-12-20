@@ -11,6 +11,7 @@ Rules
 
 - Source: choose exactly one of `repo` (GitHub shorthand), `url` (full Git URL), or `path` (local directory).
 - Selector: choose at most one of `version`, `branch`, `tag`, or `commit`.
+- Name (optional): set `name = "..."` to override the display name recorded in the lockfile and shown in `list`.
 
 GitHub shorthand (repo source)
 
@@ -83,11 +84,12 @@ Notes
 - For local sources, `commit_sha = "local"`. Such entries are skipped by
   `upgrade` and excluded from `list --outdated` comparisons.
 
-## Environment Variables
+## Environment Variables and CLI Overrides
 
 - `PEZ_CONFIG_DIR` — Directory containing `pez.toml` and `pez-lock.toml`.
 - `PEZ_DATA_DIR` — Base directory for cloned plugin repositories.
 - `PEZ_TARGET_DIR` — Override the Fish config directory used for copying plugin files. It no longer changes where `pez.toml` or `pez-lock.toml` live.
+- `PEZ_SUPPRESS_EMIT` — When set, suppress `fish -c 'emit ...'` hooks during install/upgrade/uninstall. Used by `pez activate fish` to avoid duplicate events.
 - `__fish_config_dir` / `XDG_CONFIG_HOME` — Fish configuration directory.
 - `__fish_user_data_dir` / `XDG_DATA_HOME` — Fish data directory.
 - `--jobs <N>` — Global CLI flag to override concurrency for `install` (explicit
