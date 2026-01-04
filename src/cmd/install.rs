@@ -620,7 +620,9 @@ mod tests {
     use config::{PluginSource, PluginSpec};
 
     use super::*;
+    use crate::lock_file::PluginFile;
     use crate::tests_support::env::TestEnvironmentSetup;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
     struct EnvOverride {
@@ -653,6 +655,19 @@ mod tests {
         }
     }
 
+    fn set_test_env_vars(test_env: &TestEnvironmentSetup) {
+        unsafe {
+            std::env::set_var("PEZ_CONFIG_DIR", &test_env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &test_env.data_dir);
+            std::env::set_var("PEZ_TARGET_DIR", &test_env.fish_config_dir);
+            std::env::set_var("HOME", test_env._temp_dir.path());
+            std::env::remove_var("__fish_config_dir");
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::remove_var("__fish_user_data_dir");
+            std::env::remove_var("XDG_DATA_HOME");
+        }
+    }
+
     fn init_remote_repo(path: &Path) -> String {
         std::fs::create_dir_all(path).unwrap();
         let repo = git2::Repository::init(path).unwrap();
@@ -670,6 +685,42 @@ mod tests {
             .commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
             .unwrap();
         commit_id.to_string()
+    }
+
+    fn commit_file(repo: &git2::Repository, rel_path: &Path, message: &str) -> String {
+        let mut index = repo.index().unwrap();
+        index.add_path(rel_path).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = git2::Signature::now("pez", "pez@example.com").unwrap();
+        let parent = repo
+            .head()
+            .ok()
+            .and_then(|head| head.target())
+            .and_then(|oid| repo.find_commit(oid).ok());
+        let commit_id = match parent {
+            Some(ref parent) => repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[parent])
+                .unwrap(),
+            None => repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[])
+                .unwrap(),
+        };
+        commit_id.to_string()
+    }
+
+    fn init_remote_repo_with_two_commits(path: &Path) -> (String, String) {
+        std::fs::create_dir_all(path).unwrap();
+        let repo = git2::Repository::init(path).unwrap();
+        let conf_dir = path.join(TargetDir::ConfD.as_str());
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        let rel_path = Path::new("conf.d/sequence-test.fish");
+        std::fs::write(path.join(rel_path), "echo one\n").unwrap();
+        let first = commit_file(&repo, rel_path, "first commit");
+        std::fs::write(path.join(rel_path), "echo two\n").unwrap();
+        let second = commit_file(&repo, rel_path, "second commit");
+        (first, second)
     }
 
     struct TestDataBuilder {
@@ -831,6 +882,462 @@ mod tests {
         let result = handle_existing_repository(&false, &repo, &repo_path);
         assert!(result.is_err());
         assert!(repo_path.exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_installs_local_plugin_and_updates_lock() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let source_dir = test_env._temp_dir.path().join("local-plugin");
+        let conf_dir = source_dir.join(TargetDir::ConfD.as_str());
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        std::fs::write(conf_dir.join("local-plugin.fish"), "echo local\n").unwrap();
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let args = InstallArgs {
+            plugins: Some(vec![InstallTarget::from_raw(
+                source_dir.to_string_lossy().to_string(),
+            )]),
+            force: false,
+            prune: false,
+        };
+
+        tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(run(&args)))
+            .unwrap();
+
+        let updated_config = config::load(&test_env.config_path).unwrap();
+        let plugin_specs = updated_config.plugins.unwrap();
+        assert_eq!(plugin_specs.len(), 1);
+        let repo = plugin_specs[0].get_plugin_repo().unwrap();
+        assert_eq!(repo.owner, "local");
+        assert_eq!(repo.repo, "local-plugin");
+
+        let saved_lock = crate::lock_file::load(&test_env.lock_file_path).unwrap();
+        let locked_plugin = saved_lock.get_plugin_by_repo(&repo).unwrap();
+        assert_eq!(locked_plugin.commit_sha, "local");
+
+        let fish_file = test_env
+            .fish_config_dir
+            .join(TargetDir::ConfD.as_str())
+            .join("local-plugin.fish");
+        assert!(fish_file.exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn clone_plugins_prefers_locked_commit_when_not_forced() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let remote_repo_path = temp_dir.path().join("owner").join("sequence-repo");
+        let (first, second) = init_remote_repo_with_two_commits(&remote_repo_path);
+        let remote_url = format!("file://{}", remote_repo_path.display());
+
+        let resolved = InstallTarget::from_raw(remote_url.clone())
+            .resolve()
+            .unwrap();
+        let lock_plugin = Plugin {
+            name: resolved.plugin_repo.repo.clone(),
+            repo: resolved.plugin_repo.clone(),
+            source: remote_url.clone(),
+            commit_sha: first.clone(),
+            files: vec![],
+        };
+        let lock_file = LockFile {
+            version: 1,
+            plugins: vec![lock_plugin],
+        };
+        let data_dir = temp_dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let plugins = clone_plugins(&[resolved], false, lock_file, &data_dir)
+            .await
+            .unwrap();
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].commit_sha, first);
+        assert_ne!(plugins[0].commit_sha, second);
+    }
+
+    #[test]
+    fn ensure_repo_parent_creates_missing_parent() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path().join("missing").join("repo");
+        let parent = repo_path.parent().unwrap();
+        assert!(!parent.exists());
+
+        ensure_repo_parent(&repo_path).unwrap();
+        assert!(parent.exists());
+    }
+
+    #[test]
+    fn ensure_repo_parent_skips_existing_parent_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let parent_file = temp_dir.path().join("not-a-dir");
+        std::fs::write(&parent_file, "file").unwrap();
+        let repo_path = parent_file.join("repo");
+
+        let result = ensure_repo_parent(&repo_path);
+        assert!(result.is_ok());
+        assert!(parent_file.exists());
+    }
+
+    #[test]
+    fn emit_event_only_for_conf_d() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let _override = EnvOverride::new(&["PATH", "PEZ_SUPPRESS_EMIT", "PEZ_TEST_FISH_LOG"]);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let bin_dir = temp_dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let log_path = temp_dir.path().join("fish.log");
+        let fish_path = bin_dir.join("fish");
+        let script = format!("#!/bin/sh\n\necho \"$@\" >> \"{}\"\n", log_path.display());
+        std::fs::write(&fish_path, script).unwrap();
+        let mut perms = std::fs::metadata(&fish_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fish_path, perms).unwrap();
+
+        let existing_path = std::env::var("PATH").unwrap_or_default();
+        unsafe {
+            std::env::set_var("PATH", format!("{}:{}", bin_dir.display(), existing_path));
+            std::env::remove_var("PEZ_SUPPRESS_EMIT");
+            std::env::set_var("PEZ_TEST_FISH_LOG", &log_path);
+        }
+
+        let repo = PluginRepo::new(None, "owner".to_string(), "repo".to_string()).unwrap();
+        let plugin = Plugin {
+            name: "repo".to_string(),
+            repo,
+            source: "source".to_string(),
+            commit_sha: "sha".to_string(),
+            files: vec![
+                PluginFile {
+                    dir: TargetDir::ConfD,
+                    name: "alpha.fish".to_string(),
+                },
+                PluginFile {
+                    dir: TargetDir::Functions,
+                    name: "beta.fish".to_string(),
+                },
+            ],
+        };
+
+        emit_event(&plugin, &utils::Event::Install).unwrap();
+
+        let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(log_contents.contains("emit alpha_install"));
+        assert!(!log_contents.contains("emit beta_install"));
+    }
+
+    #[test]
+    fn install_all_clones_when_repo_missing_for_locked_plugin() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let remote_root = tempfile::tempdir().unwrap();
+        let remote_repo_path = remote_root.path().join("owner").join("locked-repo");
+        let expected_commit = init_remote_repo(&remote_repo_path);
+        let remote_url = format!("file://{}", remote_repo_path.display());
+
+        let plugin_spec = PluginSpec {
+            name: None,
+            source: PluginSource::Url {
+                url: remote_url.clone(),
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![plugin_spec]),
+        });
+        test_env.setup_lock_file(crate::lock_file::LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: repo_for_id.repo.clone(),
+                repo: repo_for_id.clone(),
+                source: remote_url.clone(),
+                commit_sha: expected_commit.clone(),
+                files: vec![],
+            }],
+        });
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let force = false;
+        let prune = false;
+        let result = install_all(&force, &prune);
+        assert!(result.is_ok());
+
+        let repo_path = test_env.data_dir.join(repo_for_id.as_str());
+        assert!(repo_path.join(".git").exists());
+    }
+
+    #[test]
+    fn install_all_force_keeps_local_data_dir() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let source_dir = test_env._temp_dir.path().join("local-keep");
+        let conf_dir = source_dir.join(TargetDir::ConfD.as_str());
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        std::fs::write(conf_dir.join("local-keep.fish"), "echo keep\n").unwrap();
+
+        let plugin_spec = PluginSpec {
+            name: None,
+            source: PluginSource::Path {
+                path: source_dir.to_string_lossy().to_string(),
+            },
+        };
+        let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![plugin_spec]),
+        });
+        test_env.setup_lock_file(crate::lock_file::LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: repo_for_id.repo.clone(),
+                repo: repo_for_id.clone(),
+                source: source_dir.to_string_lossy().to_string(),
+                commit_sha: "local".to_string(),
+                files: vec![],
+            }],
+        });
+
+        let repo_path = test_env.data_dir.join(repo_for_id.as_str());
+        std::fs::create_dir_all(&repo_path).unwrap();
+        std::fs::write(repo_path.join("sentinel.txt"), "keep").unwrap();
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let force = true;
+        let prune = false;
+        let result = install_all(&force, &prune);
+        assert!(result.is_ok());
+        assert!(repo_path.join("sentinel.txt").exists());
+    }
+
+    #[test]
+    fn install_all_new_remote_repo_no_force_does_not_bail() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let remote_root = tempfile::tempdir().unwrap();
+        let remote_repo_path = remote_root.path().join("owner").join("new-remote");
+        init_remote_repo(&remote_repo_path);
+        let remote_url = format!("file://{}", remote_repo_path.display());
+
+        let plugin_spec = PluginSpec {
+            name: None,
+            source: PluginSource::Url {
+                url: remote_url.clone(),
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![plugin_spec]),
+        });
+        test_env.setup_lock_file(crate::lock_file::LockFile {
+            version: 1,
+            plugins: vec![],
+        });
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let force = false;
+        let prune = false;
+        let result = install_all(&force, &prune);
+        assert!(result.is_ok());
+
+        let repo_path = test_env.data_dir.join(repo_for_id.as_str());
+        assert!(repo_path.join(".git").exists());
+    }
+
+    #[test]
+    fn install_all_local_repo_existing_path_no_force() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let source_dir = test_env._temp_dir.path().join("local-new");
+        let conf_dir = source_dir.join(TargetDir::ConfD.as_str());
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        std::fs::write(conf_dir.join("local-new.fish"), "echo new\n").unwrap();
+
+        let plugin_spec = PluginSpec {
+            name: None,
+            source: PluginSource::Path {
+                path: source_dir.to_string_lossy().to_string(),
+            },
+        };
+        let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![plugin_spec]),
+        });
+        test_env.setup_lock_file(crate::lock_file::LockFile {
+            version: 1,
+            plugins: vec![],
+        });
+
+        let repo_path = test_env.data_dir.join(repo_for_id.as_str());
+        std::fs::create_dir_all(&repo_path).unwrap();
+        std::fs::write(repo_path.join("sentinel.txt"), "exists").unwrap();
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let force = false;
+        let prune = false;
+        let result = install_all(&force, &prune);
+        assert!(result.is_ok());
+        assert!(repo_path.join("sentinel.txt").exists());
+    }
+
+    #[test]
+    fn install_all_reports_ignored_lock_plugins_when_prune_false() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let repo_keep = PluginRepo::new(None, "owner".to_string(), "keep".to_string()).unwrap();
+        let repo_extra = PluginRepo::new(None, "owner".to_string(), "extra".to_string()).unwrap();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![PluginSpec {
+                name: None,
+                source: PluginSource::Repo {
+                    repo: repo_keep.clone(),
+                    version: None,
+                    branch: None,
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        });
+        test_env.setup_lock_file(crate::lock_file::LockFile {
+            version: 1,
+            plugins: vec![
+                Plugin {
+                    name: repo_keep.repo.clone(),
+                    repo: repo_keep.clone(),
+                    source: repo_keep.default_remote_source(),
+                    commit_sha: "keep-sha".to_string(),
+                    files: vec![],
+                },
+                Plugin {
+                    name: repo_extra.repo.clone(),
+                    repo: repo_extra.clone(),
+                    source: repo_extra.default_remote_source(),
+                    commit_sha: "extra-sha".to_string(),
+                    files: vec![],
+                },
+            ],
+        });
+
+        let repo_path = test_env.data_dir.join(repo_keep.as_str());
+        std::fs::create_dir_all(&repo_path).unwrap();
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let force = false;
+        let prune = false;
+        let (logs, result) =
+            crate::tests_support::log::capture_logs(|| install_all(&force, &prune));
+        assert!(result.is_ok());
+        assert!(
+            logs.iter()
+                .any(|line| line.contains("pez-lock.toml but not in pez.toml"))
+        );
+        let ignored_lines: Vec<_> = logs
+            .iter()
+            .filter(|line| line.starts_with("  - "))
+            .collect();
+        assert!(ignored_lines.iter().any(|line| line.contains("extra")));
+        assert!(!ignored_lines.iter().any(|line| line.contains("keep")));
     }
 
     #[test]
