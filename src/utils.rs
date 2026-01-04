@@ -381,6 +381,10 @@ fn warn_no_plugin_files() {
 // --- Color-aware labels ----------------------------------------------------
 // Colored labels when ANSI is supported; plain otherwise.
 pub(crate) fn colors_enabled_for_stderr() -> bool {
+    colors_enabled_for(&console::Term::stderr())
+}
+
+fn colors_enabled_for(term: &console::Term) -> bool {
     if std::env::var_os("NO_COLOR").is_some() {
         return false;
     }
@@ -401,7 +405,6 @@ pub(crate) fn colors_enabled_for_stderr() -> bool {
         return false;
     }
 
-    let term = console::Term::stderr();
     if !term.features().colors_supported() {
         return false;
     }
@@ -1013,6 +1016,35 @@ mod tests {
     }
 
     #[test]
+    fn copy_plugin_files_creates_target_dir_when_empty() {
+        let test_env = TestEnvironmentSetup::new();
+        let mut test_data = TestDataBuilder::new().build();
+
+        let repo = test_data.plugin_spec.get_plugin_repo().unwrap();
+        std::fs::create_dir_all(test_env.data_dir.join(repo.as_str())).unwrap();
+        test_env.add_plugin_files_to_repo(
+            &repo,
+            &[PluginFile {
+                dir: TargetDir::Functions,
+                name: "readme.txt".to_string(),
+            }],
+        );
+
+        let repo_path = test_env.data_dir.join(repo.as_str());
+        let outcome = copy_plugin_files(
+            &repo_path,
+            &test_env.fish_config_dir,
+            &mut test_data.plugin,
+            None,
+            false,
+        )
+        .expect("copy should succeed");
+
+        assert_eq!(outcome.file_count, 0);
+        assert!(test_env.fish_config_dir.join("functions").exists());
+    }
+
+    #[test]
     fn copy_plugin_files_includes_themes_and_counts() {
         let test_env = TestEnvironmentSetup::new();
         let mut test_data = TestDataBuilder::new().build();
@@ -1194,6 +1226,70 @@ mod tests {
             logs.iter()
                 .any(|msg| msg.contains("Could not extract plugin name"))
         );
+    }
+
+    #[cfg(unix)]
+    fn open_pty() -> std::io::Result<(std::fs::File, std::fs::File)> {
+        use std::os::unix::io::FromRawFd;
+
+        unsafe {
+            let master_fd = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY);
+            if master_fd < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::grantpt(master_fd) != 0 {
+                let err = std::io::Error::last_os_error();
+                libc::close(master_fd);
+                return Err(err);
+            }
+            if libc::unlockpt(master_fd) != 0 {
+                let err = std::io::Error::last_os_error();
+                libc::close(master_fd);
+                return Err(err);
+            }
+            let name_ptr = libc::ptsname(master_fd);
+            if name_ptr.is_null() {
+                let err = std::io::Error::last_os_error();
+                libc::close(master_fd);
+                return Err(err);
+            }
+            let slave_fd = libc::open(name_ptr, libc::O_RDWR | libc::O_NOCTTY);
+            if slave_fd < 0 {
+                let err = std::io::Error::last_os_error();
+                libc::close(master_fd);
+                return Err(err);
+            }
+            let master = std::fs::File::from_raw_fd(master_fd);
+            let slave = std::fs::File::from_raw_fd(slave_fd);
+            Ok((master, slave))
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn colors_enabled_for_term_on_tty() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&[
+            "NO_COLOR",
+            "CLICOLOR_FORCE",
+            "FORCE_COLOR",
+            "CLICOLOR",
+            "TERM",
+        ]);
+
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+            std::env::remove_var("CLICOLOR_FORCE");
+            std::env::remove_var("FORCE_COLOR");
+            std::env::remove_var("CLICOLOR");
+            std::env::set_var("TERM", "xterm-256color");
+        }
+
+        let (_master, slave) = open_pty().expect("open pty");
+        let read = slave.try_clone().expect("clone slave");
+        let term = console::Term::read_write_pair(read, slave);
+
+        assert!(colors_enabled_for(&term));
     }
 
     #[cfg(unix)]

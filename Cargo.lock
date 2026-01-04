@@ -701,6 +701,7 @@ dependencies = [
  "console",
  "futures",
  "git2",
+ "libc",
  "regex",
  "semver",
  "serde",
