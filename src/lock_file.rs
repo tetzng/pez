@@ -182,8 +182,7 @@ mod tests {
 
         let err = lock
             .add_plugin(plugin_with("https://example.com/owner/repo", "beta"))
-            .err()
-            .expect("expected duplicate source error");
+            .expect_err("expected duplicate source error");
         assert!(
             err.to_string().contains("Plugin already exists"),
             "unexpected error: {err}"
@@ -198,8 +197,7 @@ mod tests {
 
         let err = lock
             .add_plugin(plugin_with("https://example.com/owner/other", "alpha"))
-            .err()
-            .expect("expected duplicate name error");
+            .expect_err("expected duplicate name error");
         assert!(
             err.to_string().contains("Plugin already exists"),
             "unexpected error: {err}"
