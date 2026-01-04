@@ -433,6 +433,7 @@ mod tests {
     use crate::models::PluginRepo;
     use crate::models::TargetDir;
     use crate::tests_support::env::TestEnvironmentSetup;
+    use crate::tests_support::log::{capture_logs, env_lock};
     use std::ffi::OsString;
 
     struct EnvGuard {
@@ -571,6 +572,131 @@ mod tests {
             std::env::remove_var("PEZ_JOBS");
         }
         assert_eq!(load_jobs(), 4);
+    }
+
+    #[test]
+    fn home_dir_uses_home_env() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["HOME"]);
+        let temp = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let resolved = home_dir().expect("home dir should resolve");
+        assert_eq!(resolved, temp.path());
+    }
+
+    #[test]
+    fn load_fish_data_dir_prefers_fish_user_data_dir() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["__fish_user_data_dir", "XDG_DATA_HOME", "HOME"]);
+
+        let temp = tempfile::tempdir().unwrap();
+        let fish_data = temp.path().join("fish_data");
+        let xdg_data = temp.path().join("xdg_data");
+        std::fs::create_dir_all(&fish_data).unwrap();
+        std::fs::create_dir_all(&xdg_data).unwrap();
+
+        unsafe {
+            std::env::set_var("__fish_user_data_dir", &fish_data);
+            std::env::set_var("XDG_DATA_HOME", &xdg_data);
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let resolved = load_fish_data_dir().expect("fish data dir should resolve");
+        assert_eq!(resolved, fish_data);
+    }
+
+    #[test]
+    fn load_fish_data_dir_uses_xdg_data_home() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["__fish_user_data_dir", "XDG_DATA_HOME", "HOME"]);
+
+        let temp = tempfile::tempdir().unwrap();
+        let xdg_data = temp.path().join("xdg_data");
+        std::fs::create_dir_all(&xdg_data).unwrap();
+
+        unsafe {
+            std::env::remove_var("__fish_user_data_dir");
+            std::env::set_var("XDG_DATA_HOME", &xdg_data);
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let resolved = load_fish_data_dir().expect("fish data dir should resolve");
+        assert_eq!(resolved, xdg_data.join("fish"));
+    }
+
+    #[test]
+    fn load_fish_data_dir_falls_back_to_home() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["__fish_user_data_dir", "XDG_DATA_HOME", "HOME"]);
+
+        let temp = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::remove_var("__fish_user_data_dir");
+            std::env::remove_var("XDG_DATA_HOME");
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let resolved = load_fish_data_dir().expect("fish data dir should resolve");
+        assert_eq!(resolved, temp.path().join(".local/share/fish"));
+    }
+
+    #[test]
+    fn load_or_create_config_creates_missing_dir() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "HOME",
+        ]);
+
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().join("config_root");
+        assert!(!config_dir.exists());
+
+        unsafe {
+            std::env::set_var("PEZ_CONFIG_DIR", &config_dir);
+            std::env::remove_var("PEZ_TARGET_DIR");
+            std::env::remove_var("__fish_config_dir");
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let (_config, path) = load_or_create_config().expect("config should load");
+        assert_eq!(path, config_dir.join("pez.toml"));
+        assert!(config_dir.exists());
+    }
+
+    #[test]
+    fn load_or_create_lock_file_creates_missing_dir() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "HOME",
+        ]);
+
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().join("lock_root");
+        assert!(!config_dir.exists());
+
+        unsafe {
+            std::env::set_var("PEZ_CONFIG_DIR", &config_dir);
+            std::env::remove_var("PEZ_TARGET_DIR");
+            std::env::remove_var("__fish_config_dir");
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let (_lock_file, path) = load_or_create_lock_file().expect("lock file should load");
+        assert_eq!(path, config_dir.join("pez-lock.toml"));
+        assert!(config_dir.exists());
     }
 
     struct TestDataBuilder {
@@ -802,5 +928,302 @@ mod tests {
         assert!(test_data.plugin.files.is_empty());
         // Pre-existing file remains
         assert!(std::fs::metadata(&existing_dest).is_ok());
+    }
+
+    #[test]
+    fn copy_plugin_files_from_repo_warns_when_empty() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&[
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "HOME",
+        ]);
+
+        let test_env = TestEnvironmentSetup::new();
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+        };
+        let repo_path = test_env.data_dir.join(repo.as_str());
+        std::fs::create_dir_all(&repo_path).unwrap();
+
+        unsafe {
+            std::env::set_var("PEZ_TARGET_DIR", &test_env.fish_config_dir);
+            std::env::remove_var("__fish_config_dir");
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::set_var("HOME", test_env._temp_dir.path());
+        }
+
+        let mut plugin = Plugin {
+            name: "repo".to_string(),
+            repo,
+            source: "https://example.com/owner/repo".to_string(),
+            commit_sha: "sha".to_string(),
+            files: vec![],
+        };
+
+        let (logs, result) = capture_logs(|| copy_plugin_files_from_repo(&repo_path, &mut plugin));
+        assert!(result.is_ok());
+        assert!(plugin.files.is_empty());
+        assert!(logs.iter().any(|msg| msg.contains("No valid files found")));
+    }
+
+    #[test]
+    fn copy_plugin_files_from_repo_copies_files_without_warning() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&[
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "HOME",
+        ]);
+
+        let test_env = TestEnvironmentSetup::new();
+        let mut test_data = TestDataBuilder::new().build();
+        let plugin_files = vec![PluginFile {
+            dir: TargetDir::Functions,
+            name: "file.fish".to_string(),
+        }];
+        let repo = test_data.plugin_spec.get_plugin_repo().unwrap();
+        std::fs::create_dir_all(test_env.data_dir.join(repo.as_str())).unwrap();
+        test_env.add_plugin_files_to_repo(&repo, &plugin_files);
+
+        unsafe {
+            std::env::set_var("PEZ_TARGET_DIR", &test_env.fish_config_dir);
+            std::env::remove_var("__fish_config_dir");
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::set_var("HOME", test_env._temp_dir.path());
+        }
+
+        let repo_path = test_env.data_dir.join(repo.as_str());
+        let (logs, result) =
+            capture_logs(|| copy_plugin_files_from_repo(&repo_path, &mut test_data.plugin));
+        assert!(result.is_ok());
+        assert_eq!(test_data.plugin.files.len(), 1);
+        assert!(
+            test_env
+                .fish_config_dir
+                .join("functions")
+                .join("file.fish")
+                .exists()
+        );
+        assert!(!logs.iter().any(|msg| msg.contains("No valid files found")));
+    }
+
+    #[test]
+    fn copy_plugin_files_includes_themes_and_counts() {
+        let test_env = TestEnvironmentSetup::new();
+        let mut test_data = TestDataBuilder::new().build();
+
+        let plugin_files = vec![
+            PluginFile {
+                dir: TargetDir::Functions,
+                name: "tool.fish".to_string(),
+            },
+            PluginFile {
+                dir: TargetDir::Themes,
+                name: "dark.theme".to_string(),
+            },
+        ];
+        let repo = test_data.plugin_spec.get_plugin_repo().unwrap();
+        std::fs::create_dir_all(test_env.data_dir.join(repo.as_str())).unwrap();
+        test_env.add_plugin_files_to_repo(&repo, &plugin_files);
+
+        let repo_path = test_env.data_dir.join(repo.as_str());
+        let outcome = copy_plugin_files(
+            &repo_path,
+            &test_env.fish_config_dir,
+            &mut test_data.plugin,
+            None,
+            false,
+        )
+        .expect("copy should succeed");
+
+        assert_eq!(outcome.file_count, 2);
+        assert!(
+            test_env
+                .fish_config_dir
+                .join("themes")
+                .join("dark.theme")
+                .exists()
+        );
+        assert!(
+            test_data
+                .plugin
+                .files
+                .iter()
+                .any(|f| f.dir == TargetDir::Themes && f.name == "dark.theme")
+        );
+    }
+
+    #[test]
+    fn copy_plugin_files_creates_nested_directories() {
+        let test_env = TestEnvironmentSetup::new();
+        let mut test_data = TestDataBuilder::new().build();
+
+        let plugin_files = vec![PluginFile {
+            dir: TargetDir::Functions,
+            name: "nested/dir/tool.fish".to_string(),
+        }];
+        let repo = test_data.plugin_spec.get_plugin_repo().unwrap();
+        std::fs::create_dir_all(test_env.data_dir.join(repo.as_str())).unwrap();
+        test_env.add_plugin_files_to_repo(&repo, &plugin_files);
+
+        let repo_path = test_env.data_dir.join(repo.as_str());
+        let outcome = copy_plugin_files(
+            &repo_path,
+            &test_env.fish_config_dir,
+            &mut test_data.plugin,
+            None,
+            false,
+        )
+        .expect("copy should succeed");
+
+        assert_eq!(outcome.file_count, 1);
+        assert!(
+            test_env
+                .fish_config_dir
+                .join("functions")
+                .join("nested/dir/tool.fish")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn copy_plugin_files_recursive_copies_theme_files() {
+        let test_env = TestEnvironmentSetup::new();
+        let mut test_data = TestDataBuilder::new().build();
+
+        let plugin_files = vec![PluginFile {
+            dir: TargetDir::Themes,
+            name: "bright.theme".to_string(),
+        }];
+        let repo = test_data.plugin_spec.get_plugin_repo().unwrap();
+        std::fs::create_dir_all(test_env.data_dir.join(repo.as_str())).unwrap();
+        test_env.add_plugin_files_to_repo(&repo, &plugin_files);
+
+        let target_dir = TargetDir::Themes;
+        let target_path = test_env
+            .data_dir
+            .join(repo.as_str())
+            .join(target_dir.as_str());
+        let dest_path = test_env.fish_config_dir.join(target_dir.as_str());
+        std::fs::create_dir_all(&dest_path).unwrap();
+
+        let result = copy_plugin_files_recursive(
+            &target_path,
+            &dest_path,
+            target_dir,
+            &mut test_data.plugin,
+        )
+        .expect("copy should succeed");
+        assert_eq!(result, 1);
+        assert!(dest_path.join("bright.theme").exists());
+    }
+
+    #[test]
+    fn colors_enabled_for_stderr_respects_no_color() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&[
+            "NO_COLOR",
+            "CLICOLOR_FORCE",
+            "FORCE_COLOR",
+            "CLICOLOR",
+            "TERM",
+        ]);
+
+        unsafe {
+            std::env::set_var("NO_COLOR", "1");
+            std::env::set_var("CLICOLOR_FORCE", "1");
+            std::env::remove_var("FORCE_COLOR");
+            std::env::remove_var("CLICOLOR");
+            std::env::set_var("TERM", "xterm-256color");
+        }
+
+        assert!(!colors_enabled_for_stderr());
+    }
+
+    #[test]
+    fn colors_enabled_for_stderr_force_color_overrides_term() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&[
+            "NO_COLOR",
+            "CLICOLOR_FORCE",
+            "FORCE_COLOR",
+            "CLICOLOR",
+            "TERM",
+        ]);
+
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+            std::env::set_var("CLICOLOR_FORCE", "1");
+            std::env::remove_var("FORCE_COLOR");
+            std::env::remove_var("CLICOLOR");
+            std::env::set_var("TERM", "dumb");
+        }
+
+        assert!(colors_enabled_for_stderr());
+    }
+
+    #[test]
+    fn labels_return_expected_strings() {
+        assert_eq!(label_error(), "[Error]");
+        assert_eq!(label_notice(), "[Notice]");
+    }
+
+    #[test]
+    fn event_display_formats() {
+        assert_eq!(Event::Install.to_string(), "install");
+        assert_eq!(Event::Update.to_string(), "update");
+        assert_eq!(Event::Uninstall.to_string(), "uninstall");
+    }
+
+    #[test]
+    fn emit_event_warns_when_stem_missing() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["PEZ_SUPPRESS_EMIT"]);
+        unsafe {
+            std::env::remove_var("PEZ_SUPPRESS_EMIT");
+        }
+
+        let (logs, result) = capture_logs(|| emit_event("", &Event::Install));
+        assert!(result.is_ok());
+        assert!(
+            logs.iter()
+                .any(|msg| msg.contains("Could not extract plugin name"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn emit_event_logs_error_on_failed_command() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["PEZ_SUPPRESS_EMIT", "PATH"]);
+
+        let temp = tempfile::tempdir().unwrap();
+        let fish_path = temp.path().join("fish");
+        std::fs::write(&fish_path, "#!/bin/sh\nexit 1\n").unwrap();
+        let mut perms = std::fs::metadata(&fish_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fish_path, perms).unwrap();
+
+        let old_path = std::env::var_os("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", temp.path().display(), old_path.to_string_lossy());
+
+        unsafe {
+            std::env::remove_var("PEZ_SUPPRESS_EMIT");
+            std::env::set_var("PATH", new_path);
+        }
+
+        let (logs, result) = capture_logs(|| emit_event("plugin.fish", &Event::Install));
+        assert!(result.is_ok());
+        assert!(
+            logs.iter()
+                .any(|msg| msg.contains("Command executed with failing error code"))
+        );
     }
 }
