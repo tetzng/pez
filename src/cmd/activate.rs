@@ -56,6 +56,10 @@ if not set -q __pez_activate_version; or test "$__pez_activate_version" != "$__p
         for path in $paths
             if test -f "$path"
                 source "$path"
+            end
+        end
+        for path in $paths
+            if test -f "$path"
                 set -l name (basename "$path" .fish)
                 emit "$name"_"$phase"
             end
