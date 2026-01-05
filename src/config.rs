@@ -509,6 +509,33 @@ fn ref_to_kind(val: Option<String>) -> RefKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests_support::log::env_lock;
+    use std::ffi::OsString;
+
+    struct EnvGuard {
+        vars: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn capture(keys: &[&'static str]) -> Self {
+            let vars = keys
+                .iter()
+                .map(|&key| (key, std::env::var_os(key)))
+                .collect();
+            Self { vars }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in &self.vars {
+                match value {
+                    Some(val) => unsafe { std::env::set_var(key, val.clone()) },
+                    None => unsafe { std::env::remove_var(key) },
+                }
+            }
+        }
+    }
 
     #[test]
     fn repo_to_resolved_latest() {
@@ -582,5 +609,66 @@ mod tests {
         };
         let err = spec.to_resolved().unwrap_err();
         assert!(err.to_string().contains("Multiple version selectors"));
+    }
+
+    #[test]
+    fn get_name_prefers_explicit_name() {
+        let spec = PluginSpec {
+            name: Some("custom-name".into()),
+            source: PluginSource::Repo {
+                repo: crate::models::PluginRepo {
+                    host: None,
+                    owner: "o".into(),
+                    repo: "r".into(),
+                },
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        assert_eq!(spec.get_name().unwrap(), "custom-name");
+    }
+
+    #[test]
+    fn get_name_falls_back_to_repo_name() {
+        let spec = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo: crate::models::PluginRepo {
+                    host: None,
+                    owner: "o".into(),
+                    repo: "r".into(),
+                },
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        assert_eq!(spec.get_name().unwrap(), "r");
+    }
+
+    #[test]
+    fn expand_tilde_resolves_home_variants() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["HOME"]);
+        let temp = tempfile::tempdir().unwrap();
+
+        unsafe {
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let expanded = expand_tilde("~/plugins").unwrap();
+        assert_eq!(
+            expanded,
+            temp.path().join("plugins").to_string_lossy().to_string()
+        );
+
+        let home = expand_tilde("~").unwrap();
+        assert_eq!(home, temp.path().to_string_lossy().to_string());
+
+        let unchanged = expand_tilde("/absolute/path").unwrap();
+        assert_eq!(unchanged, "/absolute/path");
     }
 }

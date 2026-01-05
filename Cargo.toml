@@ -32,6 +32,9 @@ walkdir = "2.5.0"
 semver = "1.0.23"
 url = "2.5.2"
 
+[dev-dependencies]
+libc = "0.2"
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
