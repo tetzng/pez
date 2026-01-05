@@ -814,6 +814,72 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn prune_parallel_missing_repo_with_force_removes_plugin() {
+        let _jobs = JobsGuard::set(1);
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_fish_config();
+
+        let mut ctx = test_env.create_context();
+        let result = prune_parallel(true, true, &mut ctx).await;
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(
+            lock_file.plugins.len(),
+            1,
+            "Unused plugin should be removed when --force is set"
+        );
+        assert_eq!(lock_file.plugins[0].repo.as_str(), "owner/used-repo");
+        assert!(
+            fs::metadata(test_env.fish_config_dir.join("functions/unused.fish")).is_err(),
+            "Unused plugin file should be deleted"
+        );
+        assert!(
+            fs::metadata(test_env.fish_config_dir.join("functions/used.fish")).is_ok(),
+            "Used plugin file should still exist"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prune_parallel_does_not_save_when_no_sources_removed() {
+        let _jobs = JobsGuard::set(1);
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+
+        let mut perms = fs::metadata(&test_env.lock_file_path)
+            .unwrap()
+            .permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&test_env.lock_file_path, perms).unwrap();
+
+        let mut ctx = test_env.create_context();
+        let result = prune_parallel(false, true, &mut ctx).await;
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(
+            lock_file.plugins.len(),
+            2,
+            "Lock file should remain unchanged when no sources are removed"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn prune_parallel_aborts_without_yes_when_confirm_false() {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
@@ -952,6 +1018,8 @@ mod tests {
         let joined = logs.join("\n");
         assert!(joined.contains("Plugins that would be removed:"));
         assert!(joined.contains("owner/unused-repo"));
+        assert!(!joined.contains("owner/used-repo"));
+        assert!(!joined.contains("Repository directory at"));
         assert!(!joined.contains("\u{1b}["));
     }
 
