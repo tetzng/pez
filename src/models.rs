@@ -267,10 +267,22 @@ mod tests {
                 expected_repo: "repo",
             },
             RemoteCase {
+                url: "https://gitlab.com/group/subgroup/repo",
+                expected_host: Some("gitlab.com"),
+                expected_owner: "subgroup",
+                expected_repo: "repo",
+            },
+            RemoteCase {
                 url: "git@bitbucket.org:team/pkg.git",
                 expected_host: Some("bitbucket.org"),
                 expected_owner: "team",
                 expected_repo: "pkg",
+            },
+            RemoteCase {
+                url: "git@gitlab.com:group/subgroup/repo.git",
+                expected_host: Some("gitlab.com"),
+                expected_owner: "subgroup",
+                expected_repo: "repo",
             },
         ];
 
