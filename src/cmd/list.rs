@@ -2,7 +2,6 @@ use crate::{cli, config, git, lock_file::Plugin, resolver, utils};
 
 use console::Emoji;
 use serde_json::json;
-use std::io;
 use tabled::{Table, Tabled};
 use tracing::{info, warn};
 
@@ -29,11 +28,11 @@ struct OutdatedPlugin {
     latest: String,
 }
 
-pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
+pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<String> {
     let result = utils::load_lock_file();
     if result.is_err() {
         info!("No plugins installed!");
-        return Ok(());
+        return Ok(String::new());
     }
 
     let config_opt = utils::load_config().ok().map(|(c, _)| c);
@@ -41,7 +40,7 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
         Ok(v) => v,
         Err(_) => {
             info!("No plugins installed!");
-            return Ok(());
+            return Ok(String::new());
         }
     };
     let mut plugins = lock_file.plugins.clone();
@@ -55,10 +54,10 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
     let plugins = &plugins;
     if plugins.is_empty() {
         info!("No plugins installed!");
-        return Ok(());
+        return Ok(String::new());
     }
 
-    if args.outdated {
+    let output = if args.outdated {
         match args.format.clone().unwrap_or(cli::ListFormat::Plain) {
             cli::ListFormat::Table => list_outdated_table(plugins, config_opt.as_ref())?,
             cli::ListFormat::Json => list_outdated_json(plugins, config_opt.as_ref())?,
@@ -66,29 +65,33 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
         }
     } else {
         match args.format.clone().unwrap_or(cli::ListFormat::Plain) {
-            cli::ListFormat::Table => display_plugins_in_table(plugins, config_opt.as_ref()),
+            cli::ListFormat::Table => list_table(plugins, config_opt.as_ref()),
             cli::ListFormat::Json => list_json(plugins, config_opt.as_ref())?,
-            cli::ListFormat::Plain => list(plugins)?,
+            cli::ListFormat::Plain => list(plugins),
         }
+    };
+
+    if !output.is_empty() {
+        print!("{output}");
     }
 
-    Ok(())
+    Ok(output)
 }
 
-fn list(plugins: &[Plugin]) -> anyhow::Result<()> {
-    display_plugins(plugins, io::stdout())?;
-    Ok(())
+fn list(plugins: &[Plugin]) -> String {
+    render_plugins_plain(plugins)
 }
 
-fn display_plugins<W: io::Write>(plugins: &[Plugin], mut writer: W) -> anyhow::Result<()> {
+fn render_plugins_plain(plugins: &[Plugin]) -> String {
+    let mut output = String::new();
     for plugin in plugins {
-        writeln!(writer, "{}", plugin.repo)?;
+        output.push_str(&plugin.repo.as_str());
+        output.push('\n');
     }
-
-    Ok(())
+    output
 }
 
-fn display_plugins_in_table(plugins: &[Plugin], config: Option<&crate::config::Config>) {
+fn list_table(plugins: &[Plugin], config: Option<&crate::config::Config>) -> String {
     fn short7(s: &str) -> String {
         s.chars().take(7).collect()
     }
@@ -150,22 +153,20 @@ fn display_plugins_in_table(plugins: &[Plugin], config: Option<&crate::config::C
         })
         .collect::<Vec<PluginRow>>();
     let table = Table::new(&plugin_rows);
-    println!("{table}");
+    table.to_string()
 }
 
-fn list_outdated(plugins: &[Plugin], config: Option<&config::Config>) -> anyhow::Result<()> {
+fn list_outdated(plugins: &[Plugin], config: Option<&config::Config>) -> anyhow::Result<String> {
     let outdated_plugins = get_outdated_plugins(plugins, config)?;
     if outdated_plugins.is_empty() {
         info!("{}All plugins are up to date!", Emoji("🎉 ", ""));
-        return Ok(());
+        return Ok(String::new());
     }
     let plugins_only: Vec<Plugin> = outdated_plugins
         .into_iter()
         .map(|entry| entry.plugin)
         .collect();
-    display_plugins(&plugins_only, io::stdout())?;
-
-    Ok(())
+    Ok(render_plugins_plain(&plugins_only))
 }
 
 fn get_outdated_plugins(
@@ -260,14 +261,17 @@ fn get_outdated_plugins(
     Ok(outdated_plugins)
 }
 
-fn list_outdated_table(plugins: &[Plugin], config: Option<&config::Config>) -> anyhow::Result<()> {
+fn list_outdated_table(
+    plugins: &[Plugin],
+    config: Option<&config::Config>,
+) -> anyhow::Result<String> {
     fn short7(s: &str) -> String {
         s.chars().take(7).collect()
     }
     let outdated_plugins = get_outdated_plugins(plugins, config)?;
     if outdated_plugins.is_empty() {
         info!("{}All plugins are up to date!", Emoji("🎉 ", ""));
-        return Ok(());
+        return Ok(String::new());
     }
 
     let plugin_rows = outdated_plugins
@@ -281,12 +285,10 @@ fn list_outdated_table(plugins: &[Plugin], config: Option<&config::Config>) -> a
         })
         .collect::<Vec<PluginOutdatedRow>>();
     let table = Table::new(&plugin_rows);
-    println!("{table}");
-
-    Ok(())
+    Ok(table.to_string())
 }
 
-fn list_json(plugins: &[Plugin], config: Option<&crate::config::Config>) -> anyhow::Result<()> {
+fn list_json(plugins: &[Plugin], config: Option<&crate::config::Config>) -> anyhow::Result<String> {
     fn selector_of(
         cfg: Option<&crate::config::Config>,
         repo: &crate::models::PluginRepo,
@@ -340,15 +342,17 @@ fn list_json(plugins: &[Plugin], config: Option<&crate::config::Config>) -> anyh
             }))
             .collect::<Vec<_>>()
     );
-    println!("{}", serde_json::to_string_pretty(&value)?);
-    Ok(())
+    Ok(serde_json::to_string_pretty(&value)?)
 }
 
-fn list_outdated_json(plugins: &[Plugin], config: Option<&config::Config>) -> anyhow::Result<()> {
+fn list_outdated_json(
+    plugins: &[Plugin],
+    config: Option<&config::Config>,
+) -> anyhow::Result<String> {
     let outdated_plugins = get_outdated_plugins(plugins, config)?;
     if outdated_plugins.is_empty() {
         info!("{}All plugins are up to date!", Emoji("🎉 ", ""));
-        return Ok(());
+        return Ok(String::new());
     }
     let value = json!(
         outdated_plugins
@@ -364,8 +368,7 @@ fn list_outdated_json(plugins: &[Plugin], config: Option<&config::Config>) -> an
             })
             .collect::<Vec<_>>()
     );
-    println!("{}", serde_json::to_string_pretty(&value)?);
-    Ok(())
+    Ok(serde_json::to_string_pretty(&value)?)
 }
 
 fn describe_selection(selection: &resolver::Selection) -> String {
@@ -417,13 +420,8 @@ mod tests {
             },
         ];
 
-        let mut output = io::Cursor::new(Vec::new());
-        display_plugins(&plugins, &mut output).unwrap();
-
-        let actual_output = String::from_utf8(output.into_inner()).unwrap();
-        let expected_output = "owner/repo\nowner/repo2\n";
-
-        assert_eq!(actual_output, expected_output);
+        let output = render_plugins_plain(&plugins);
+        assert_eq!(output, "owner/repo\nowner/repo2\n");
     }
 
     struct EnvOverride {

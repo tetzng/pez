@@ -9,23 +9,31 @@ use clap::error::ErrorKind;
 use std::io::Read;
 use std::path::PathBuf;
 
-pub(crate) fn run(args: &FilesArgs) -> anyhow::Result<()> {
+pub(crate) fn run(args: &FilesArgs) -> anyhow::Result<Vec<PathBuf>> {
     let paths = collect_paths(args)?;
     match args.format {
         FilesFormat::Paths => {
-            for p in paths {
-                println!("{}", p.display());
+            for line in render_paths(&paths) {
+                println!("{line}");
             }
         }
         FilesFormat::Json => {
-            let rendered: Vec<String> = paths
-                .into_iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&rendered)?);
+            println!("{}", render_paths_json(&paths)?);
         }
     }
-    Ok(())
+    Ok(paths)
+}
+
+fn render_paths(paths: &[PathBuf]) -> Vec<String> {
+    paths.iter().map(|p| p.display().to_string()).collect()
+}
+
+fn render_paths_json(paths: &[PathBuf]) -> anyhow::Result<String> {
+    let rendered: Vec<String> = paths
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+    Ok(serde_json::to_string_pretty(&rendered)?)
 }
 
 fn collect_paths(args: &FilesArgs) -> anyhow::Result<Vec<PathBuf>> {

@@ -2,8 +2,10 @@
 ///
 /// Prints Fish wrapper code to stdout. Keep stdout clean of logs so it can be
 /// piped into `source`.
-pub(crate) fn run_fish() {
-    print!("{}", fish_script());
+pub(crate) fn run_fish() -> String {
+    let script = fish_script();
+    print!("{script}");
+    script
 }
 
 fn fish_script() -> String {

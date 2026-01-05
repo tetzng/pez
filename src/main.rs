@@ -57,25 +57,29 @@ async fn main() -> anyhow::Result<()> {
             cmd::upgrade::run(args).await?;
         }
         cli::Commands::List(args) => {
-            cmd::list::run(args)?;
+            let _ = cmd::list::run(args)?;
         }
         cli::Commands::Prune(args) => {
             cmd::prune::run(args).await?;
         }
         cli::Commands::Doctor(args) => {
-            cmd::doctor::run(args)?;
+            let _ = cmd::doctor::run(args)?;
         }
         cli::Commands::Migrate(args) => {
             cmd::migrate::run(args).await?;
         }
         cli::Commands::Files(args) => {
-            cmd::files::run(args)?;
+            let _ = cmd::files::run(args)?;
         }
         cli::Commands::Activate(args) => match args.shell {
-            cli::ShellType::Fish => cmd::activate::run_fish(),
+            cli::ShellType::Fish => {
+                let _ = cmd::activate::run_fish();
+            }
         },
         cli::Commands::Completions { shell } => match shell {
-            cli::ShellType::Fish => cmd::completion::generate_fish_completion()?,
+            cli::ShellType::Fish => {
+                let _ = cmd::completion::generate_fish_completion()?;
+            }
         },
     }
 
