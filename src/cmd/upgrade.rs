@@ -193,9 +193,213 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use crate::config;
-    use crate::lock_file::{LockFile, PluginFile};
+    use crate::lock_file::{self, LockFile, PluginFile};
     use crate::tests_support::env::TestEnvironmentSetup;
     use crate::tests_support::log::capture_logs;
+    use std::ffi::OsString;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+
+    struct EnvOverride {
+        keys: Vec<&'static str>,
+        previous: Vec<Option<OsString>>,
+    }
+
+    impl EnvOverride {
+        fn new(keys: &[&'static str]) -> Self {
+            let previous = keys.iter().map(std::env::var_os).collect();
+            Self {
+                keys: keys.to_vec(),
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvOverride {
+        fn drop(&mut self) {
+            for (key, prev) in self.keys.iter().zip(self.previous.drain(..)) {
+                if let Some(value) = prev {
+                    unsafe {
+                        std::env::set_var(key, value);
+                    }
+                } else {
+                    unsafe {
+                        std::env::remove_var(key);
+                    }
+                }
+            }
+        }
+    }
+
+    fn commit_paths(repo: &git2::Repository, paths: &[&str], message: &str) -> String {
+        let mut index = repo.index().unwrap();
+        for path in paths {
+            index.add_path(Path::new(path)).unwrap();
+        }
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = git2::Signature::now("tester", "tester@example.com").unwrap();
+        let parent = repo
+            .head()
+            .ok()
+            .and_then(|head| head.target())
+            .and_then(|oid| repo.find_commit(oid).ok());
+        let commit_id = match parent {
+            Some(ref parent) => repo
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    message,
+                    &tree,
+                    &[parent],
+                )
+                .unwrap(),
+            None => repo
+                .commit(Some("refs/heads/main"), &sig, &sig, message, &tree, &[])
+                .unwrap(),
+        };
+        commit_id.to_string()
+    }
+
+    fn push_origin_refs(repo: &git2::Repository, refs: &[&str]) {
+        let mut remote = repo.find_remote("origin").unwrap();
+        remote
+            .connect(git2::Direction::Push)
+            .and_then(|_| remote.push(refs, None))
+            .unwrap();
+    }
+
+    fn push_origin(repo: &git2::Repository) {
+        push_origin_refs(repo, &["refs/heads/main:refs/heads/main"]);
+    }
+
+    fn init_origin_with_two_commits() -> (tempfile::TempDir, PathBuf, String, String) {
+        let tmp = tempfile::tempdir().unwrap();
+        let origin_path = tmp.path().join("origin.git");
+        let workdir_path = tmp.path().join("work");
+        let origin = git2::Repository::init_bare(&origin_path).unwrap();
+        let work = git2::Repository::init(&workdir_path).unwrap();
+
+        std::fs::create_dir_all(workdir_path.join(TargetDir::ConfD.as_str())).unwrap();
+        std::fs::create_dir_all(workdir_path.join(TargetDir::Functions.as_str())).unwrap();
+        std::fs::write(
+            workdir_path
+                .join(TargetDir::ConfD.as_str())
+                .join("alpha.fish"),
+            "echo one\n",
+        )
+        .unwrap();
+        std::fs::write(
+            workdir_path
+                .join(TargetDir::Functions.as_str())
+                .join("beta.fish"),
+            "echo beta\n",
+        )
+        .unwrap();
+
+        let first = commit_paths(
+            &work,
+            &["conf.d/alpha.fish", "functions/beta.fish"],
+            "first commit",
+        );
+        work.remote("origin", origin_path.to_str().unwrap())
+            .unwrap();
+        let first_commit = work
+            .find_commit(git2::Oid::from_str(&first).unwrap())
+            .unwrap();
+        work.branch("pinned", &first_commit, false).unwrap();
+        push_origin_refs(
+            &work,
+            &[
+                "refs/heads/main:refs/heads/main",
+                "refs/heads/pinned:refs/heads/pinned",
+            ],
+        );
+        origin.set_head("refs/heads/main").unwrap();
+
+        std::fs::write(
+            workdir_path
+                .join(TargetDir::ConfD.as_str())
+                .join("alpha.fish"),
+            "echo two\n",
+        )
+        .unwrap();
+        let second = commit_paths(&work, &["conf.d/alpha.fish"], "second commit");
+        push_origin(&work);
+        origin.set_head("refs/heads/main").unwrap();
+
+        (tmp, origin_path, first, second)
+    }
+
+    struct UpgradeFixture {
+        _origin_tmp: tempfile::TempDir,
+        env: TestEnvironmentSetup,
+        repo: PluginRepo,
+        first_commit: String,
+        second_commit: String,
+    }
+
+    impl UpgradeFixture {
+        fn new(include_in_config: bool) -> Self {
+            let (origin_tmp, origin_path, first, second) = init_origin_with_two_commits();
+            let mut env = TestEnvironmentSetup::new();
+            let repo = PluginRepo {
+                host: None,
+                owner: "owner".into(),
+                repo: "upgrade".into(),
+            };
+            let repo_path = env.data_dir.join(repo.as_str());
+            crate::git::clone_repository(origin_path.to_str().unwrap(), &repo_path).unwrap();
+
+            let config = if include_in_config {
+                config::Config {
+                    plugins: Some(vec![config::PluginSpec {
+                        name: None,
+                        source: config::PluginSource::Repo {
+                            repo: repo.clone(),
+                            version: None,
+                            branch: None,
+                            tag: None,
+                            commit: None,
+                        },
+                    }]),
+                }
+            } else {
+                config::Config { plugins: None }
+            };
+            env.setup_config(config);
+
+            env.setup_lock_file(LockFile {
+                version: 1,
+                plugins: vec![crate::lock_file::Plugin {
+                    name: "upgrade".into(),
+                    repo: repo.clone(),
+                    source: "https://example.com/owner/upgrade".into(),
+                    commit_sha: first.clone(),
+                    files: vec![
+                        PluginFile {
+                            dir: TargetDir::ConfD,
+                            name: "alpha.fish".into(),
+                        },
+                        PluginFile {
+                            dir: TargetDir::Functions,
+                            name: "beta.fish".into(),
+                        },
+                    ],
+                }],
+            });
+
+            Self {
+                _origin_tmp: origin_tmp,
+                env,
+                repo,
+                first_commit: first,
+                second_commit: second,
+            }
+        }
+    }
 
     #[test]
     fn test_upgrade_logs_already_up_to_date() {
@@ -309,5 +513,130 @@ mod tests {
                 std::env::remove_var("NO_COLOR")
             }
         }
+    }
+
+    #[test]
+    fn upgrade_plugin_uses_pinned_selection_for_repo() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        crate::utils::clear_cli_jobs_override_for_tests();
+        let mut fixture = UpgradeFixture::new(false);
+        let _override = EnvOverride::new(&[
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+        ]);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+            std::env::set_var("__fish_config_dir", &fixture.env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &fixture.env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &fixture.env.data_dir);
+        }
+
+        fixture.env.setup_config(config::Config {
+            plugins: Some(vec![config::PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: fixture.repo.clone(),
+                    version: None,
+                    branch: Some("pinned".into()),
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        });
+
+        upgrade_plugin(&fixture.repo).expect("upgrade should succeed");
+
+        let lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
+        let updated = lock.get_plugin_by_repo(&fixture.repo).unwrap();
+        assert_eq!(updated.commit_sha, fixture.first_commit);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_upgrades_selected_plugins_and_emits_events() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        crate::utils::clear_cli_jobs_override_for_tests();
+        let fixture = UpgradeFixture::new(false);
+        let _override = EnvOverride::new(&[
+            "PATH",
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_JOBS",
+        ]);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let bin_dir = temp_dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let log_path = temp_dir.path().join("fish.log");
+        let fish_path = bin_dir.join("fish");
+        let script = format!("#!/bin/sh\n\necho \"$@\" >> \"{}\"\n", log_path.display());
+        std::fs::write(&fish_path, script).unwrap();
+        let mut perms = std::fs::metadata(&fish_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fish_path, perms).unwrap();
+
+        let existing_path = std::env::var("PATH").unwrap_or_default();
+        unsafe {
+            std::env::set_var("PATH", format!("{}:{}", bin_dir.display(), existing_path));
+            std::env::remove_var("PEZ_SUPPRESS_EMIT");
+            std::env::set_var("__fish_config_dir", &fixture.env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &fixture.env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &fixture.env.data_dir);
+            std::env::set_var("PEZ_JOBS", "1");
+        }
+
+        let args = UpgradeArgs {
+            plugins: Some(vec![fixture.repo.clone()]),
+        };
+        run(&args).await.expect("run should succeed");
+
+        let cfg = config::load(&fixture.env.config_path).unwrap();
+        assert!(
+            cfg.plugins
+                .unwrap_or_default()
+                .iter()
+                .any(|p| p.get_plugin_repo().ok().as_ref() == Some(&fixture.repo))
+        );
+
+        let lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
+        let updated = lock.get_plugin_by_repo(&fixture.repo).unwrap();
+        assert_eq!(updated.commit_sha, fixture.second_commit);
+
+        let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(log_contents.contains("emit alpha_update"));
+        assert!(!log_contents.contains("emit beta_update"));
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_upgrades_all_plugins() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        crate::utils::clear_cli_jobs_override_for_tests();
+        let fixture = UpgradeFixture::new(true);
+        let _override = EnvOverride::new(&[
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_JOBS",
+        ]);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+            std::env::set_var("__fish_config_dir", &fixture.env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &fixture.env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &fixture.env.data_dir);
+            std::env::set_var("PEZ_JOBS", "1");
+        }
+
+        let args = UpgradeArgs { plugins: None };
+        run(&args).await.expect("run should succeed");
+
+        let lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
+        let updated = lock.get_plugin_by_repo(&fixture.repo).unwrap();
+        assert_eq!(updated.commit_sha, fixture.second_commit);
     }
 }
