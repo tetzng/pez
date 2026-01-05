@@ -181,7 +181,10 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
             trimmed.contains("://") || trimmed.starts_with("git@") || trimmed.starts_with("ssh://");
         if looks_like_url {
             let last_segment = if trimmed.starts_with("git@") {
-                let after_host = trimmed.splitn(2, ':').nth(1).unwrap_or(trimmed);
+                let after_host = trimmed
+                    .split_once(':')
+                    .map(|(_, rest)| rest)
+                    .unwrap_or(trimmed);
                 after_host.rsplit('/').next().unwrap_or(after_host)
             } else {
                 trimmed.rsplit('/').next().unwrap_or(trimmed)
