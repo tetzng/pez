@@ -121,7 +121,7 @@ async fn clone_plugins(
     let lock_file = Arc::new(Mutex::new(lock_file));
     let new_lock_plugins: Arc<Mutex<Vec<Plugin>>> = Arc::new(Mutex::new(vec![]));
 
-    let jobs = utils::load_jobs();
+    let jobs = utils::load_jobs().max(1);
     stream::iter(resolved_targets.iter().cloned())
         .for_each_concurrent(jobs, |resolved| {
             let new_lock_plugins = Arc::clone(&new_lock_plugins);

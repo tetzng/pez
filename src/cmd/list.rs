@@ -1,4 +1,5 @@
 use crate::{cli, config, git, lock_file::Plugin, resolver, utils};
+use std::io::Write;
 
 use console::Emoji;
 use serde_json::json;
@@ -29,6 +30,11 @@ struct OutdatedPlugin {
 }
 
 pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<String> {
+    let mut stdout = std::io::stdout();
+    run_with_writer(args, &mut stdout)
+}
+
+fn run_with_writer<W: Write>(args: &cli::ListArgs, writer: &mut W) -> anyhow::Result<String> {
     let result = utils::load_lock_file();
     if result.is_err() {
         info!("No plugins installed!");
@@ -72,7 +78,7 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<String> {
     };
 
     if !output.is_empty() {
-        print!("{output}");
+        writer.write_all(output.as_bytes())?;
     }
 
     Ok(output)
@@ -440,6 +446,23 @@ mod tests {
     }
 
     #[test]
+    fn list_run_writes_output() {
+        let mut env = TestEnvironmentSetup::new();
+        setup_list_env(&mut env);
+        let args = cli::ListArgs {
+            format: Some(cli::ListFormat::Plain),
+            outdated: false,
+            filter: Some(cli::ListFilter::Remote),
+        };
+
+        let mut buffer = Vec::new();
+        let output = with_env(&env, || run_with_writer(&args, &mut buffer).unwrap());
+        let printed = String::from_utf8(buffer).unwrap();
+        assert_eq!(printed, output);
+        assert!(!printed.is_empty());
+    }
+
+    #[test]
     fn list_table_includes_selector_and_short_commit() {
         let mut env = TestEnvironmentSetup::new();
         setup_list_env(&mut env);
@@ -474,6 +497,39 @@ mod tests {
             .find(|entry| entry["repo"].as_str() == Some(remote.as_str()))
             .expect("remote plugin missing");
         assert_eq!(plugin["selector"].as_str(), Some("branch:main"));
+    }
+
+    #[test]
+    fn list_table_selector_matches_repo() {
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".to_string(),
+            repo: "remote".to_string(),
+        };
+        let repo_str = repo.as_str();
+        let config = config::Config {
+            plugins: Some(vec![PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: repo.clone(),
+                    version: None,
+                    branch: Some("main".to_string()),
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        };
+        let plugins = vec![Plugin {
+            name: "remote".to_string(),
+            repo: repo.clone(),
+            source: repo.default_remote_source(),
+            commit_sha: "abcdefghi".to_string(),
+            files: vec![],
+        }];
+
+        let output = list_table(&plugins, Some(&config));
+        assert!(output.contains("branch:main"));
+        assert!(output.contains(repo_str.as_str()));
     }
 
     #[test]
@@ -758,6 +814,134 @@ mod tests {
             std::env::set_var("NO_COLOR", "1");
         }
         guard
+    }
+
+    #[test]
+    fn list_outdated_emits_plain_output() {
+        let _lock = env_lock().lock().unwrap();
+        let (tmp, origin_path, base_commit, branch_commit) = init_remote_with_branch("feature");
+        let env = TestEnvironmentSetup::new();
+        let _env_guard = configure_env(&env);
+
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".into(),
+            repo: "pkg".into(),
+        };
+        let repo_str = repo.as_str();
+        let remote = clone_into_data_dir(&origin_path, &env, &repo);
+
+        let config = config::Config {
+            plugins: Some(vec![PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: repo.clone(),
+                    version: None,
+                    branch: Some("feature".into()),
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        };
+
+        let plugins = vec![Plugin {
+            name: "pkg".into(),
+            repo: repo.clone(),
+            source: remote,
+            commit_sha: base_commit.clone(),
+            files: vec![],
+        }];
+
+        let output = list_outdated(&plugins, Some(&config)).unwrap();
+        assert_eq!(output, format!("{}\n", repo_str));
+        assert_ne!(base_commit, branch_commit);
+        drop(tmp);
+    }
+
+    #[test]
+    fn list_outdated_table_includes_short_commits() {
+        let _lock = env_lock().lock().unwrap();
+        let (tmp, origin_path, base_commit, branch_commit) = init_remote_with_branch("feature");
+        let env = TestEnvironmentSetup::new();
+        let _env_guard = configure_env(&env);
+
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".into(),
+            repo: "pkg".into(),
+        };
+        let remote = clone_into_data_dir(&origin_path, &env, &repo);
+
+        let config = config::Config {
+            plugins: Some(vec![PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: repo.clone(),
+                    version: None,
+                    branch: Some("feature".into()),
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        };
+
+        let plugins = vec![Plugin {
+            name: "pkg".into(),
+            repo: repo.clone(),
+            source: remote,
+            commit_sha: base_commit.clone(),
+            files: vec![],
+        }];
+
+        let output = list_outdated_table(&plugins, Some(&config)).unwrap();
+        assert!(output.contains(&base_commit[..7]));
+        assert!(output.contains(&branch_commit[..7]));
+        drop(tmp);
+    }
+
+    #[test]
+    fn list_outdated_json_includes_commits() {
+        let _lock = env_lock().lock().unwrap();
+        let (tmp, origin_path, base_commit, branch_commit) = init_remote_with_branch("feature");
+        let env = TestEnvironmentSetup::new();
+        let _env_guard = configure_env(&env);
+
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".into(),
+            repo: "pkg".into(),
+        };
+        let repo_str = repo.as_str();
+        let remote = clone_into_data_dir(&origin_path, &env, &repo);
+
+        let config = config::Config {
+            plugins: Some(vec![PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: repo.clone(),
+                    version: None,
+                    branch: Some("feature".into()),
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        };
+
+        let plugins = vec![Plugin {
+            name: "pkg".into(),
+            repo: repo.clone(),
+            source: remote,
+            commit_sha: base_commit.clone(),
+            files: vec![],
+        }];
+
+        let output = list_outdated_json(&plugins, Some(&config)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        let entry = value.as_array().unwrap().first().unwrap();
+        assert_eq!(entry["repo"].as_str(), Some(repo_str.as_str()));
+        assert_eq!(entry["current"].as_str(), Some(base_commit.as_str()));
+        assert_eq!(entry["latest"].as_str(), Some(branch_commit.as_str()));
+        drop(tmp);
     }
 
     #[test]

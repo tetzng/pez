@@ -51,7 +51,16 @@ fn confirm_removal() -> anyhow::Result<bool> {
         Emoji("🚧 ", "")
     );
     let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+    #[cfg(test)]
+    if let Some(forced) = take_confirm_input_for_tests() {
+        input = forced;
+    } else {
+        io::stdin().read_line(&mut input)?;
+    }
+    #[cfg(not(test))]
+    {
+        io::stdin().read_line(&mut input)?;
+    }
     Ok(input.trim().to_lowercase() == "y")
 }
 
@@ -169,6 +178,18 @@ where
 }
 
 async fn prune_parallel(force: bool, yes: bool, ctx: &mut PruneContext<'_>) -> anyhow::Result<()> {
+    prune_parallel_with_confirm(force, yes, ctx, confirm_removal).await
+}
+
+async fn prune_parallel_with_confirm<F>(
+    force: bool,
+    yes: bool,
+    ctx: &mut PruneContext<'_>,
+    confirm_removal: F,
+) -> anyhow::Result<()>
+where
+    F: Fn() -> anyhow::Result<bool>,
+{
     info!("{}Checking for unused plugins...", Emoji("🔍 ", ""));
 
     let remove_plugins: Vec<_> = find_unused_plugins(ctx.config, ctx.lock_file)?;
@@ -196,7 +217,7 @@ async fn prune_parallel(force: bool, yes: bool, ctx: &mut PruneContext<'_>) -> a
         }
     }
 
-    let jobs = utils::load_jobs();
+    let jobs = utils::load_jobs().max(1);
     let fish_config_dir = ctx.fish_config_dir.to_path_buf();
     let data_dir = ctx.data_dir.to_path_buf();
 
@@ -352,11 +373,48 @@ fn dry_run(force: bool, ctx: &mut PruneContext) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
+fn confirm_input_store() -> &'static std::sync::Mutex<Option<String>> {
+    static CONFIRM_INPUT: std::sync::OnceLock<std::sync::Mutex<Option<String>>> =
+        std::sync::OnceLock::new();
+    CONFIRM_INPUT.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+#[cfg(test)]
+fn take_confirm_input_for_tests() -> Option<String> {
+    confirm_input_store().lock().unwrap().take()
+}
+
+#[cfg(test)]
+struct ConfirmInputGuard {
+    prev: Option<String>,
+}
+
+#[cfg(test)]
+impl ConfirmInputGuard {
+    fn new(value: Option<String>) -> Self {
+        let store = confirm_input_store();
+        let mut guard = store.lock().unwrap();
+        let prev = guard.take();
+        *guard = value;
+        Self { prev }
+    }
+}
+
+#[cfg(test)]
+impl Drop for ConfirmInputGuard {
+    fn drop(&mut self) {
+        let store = confirm_input_store();
+        let mut guard = store.lock().unwrap();
+        *guard = self.prev.take();
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use std::vec;
+    use std::{ffi::OsString, future::Future, vec};
 
     use super::*;
-    use crate::tests_support::log::capture_logs;
+    use crate::tests_support::log::{capture_logs, env_lock};
     use crate::{
         lock_file::{self, PluginFile},
         models::PluginRepo,
@@ -364,6 +422,67 @@ mod tests {
         tests_support::env::TestEnvironmentSetup,
     };
     use config::{PluginSource, PluginSpec};
+
+    struct EnvOverride {
+        keys: Vec<&'static str>,
+        previous: Vec<Option<OsString>>,
+    }
+
+    impl EnvOverride {
+        fn new(keys: &[&'static str]) -> Self {
+            let previous = keys.iter().map(std::env::var_os).collect();
+            Self {
+                keys: keys.to_vec(),
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvOverride {
+        fn drop(&mut self) {
+            for (key, prev) in self.keys.iter().zip(self.previous.drain(..)) {
+                match prev {
+                    Some(value) => unsafe {
+                        std::env::set_var(key, value);
+                    },
+                    None => unsafe {
+                        std::env::remove_var(key);
+                    },
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    async fn with_env_async<F, Fut, R>(env: &TestEnvironmentSetup, f: F) -> R
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = R>,
+    {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvOverride::new(&["__fish_config_dir", "PEZ_CONFIG_DIR", "PEZ_DATA_DIR"]);
+        unsafe {
+            std::env::set_var("__fish_config_dir", &env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
+        }
+        f().await
+    }
+
+    struct JobsGuard;
+
+    impl JobsGuard {
+        fn set(value: usize) -> Self {
+            utils::set_cli_jobs_override(Some(value));
+            Self
+        }
+    }
+
+    impl Drop for JobsGuard {
+        fn drop(&mut self) {
+            utils::clear_cli_jobs_override_for_tests();
+        }
+    }
 
     struct TestDataBuilder {
         used_plugin: Plugin,
@@ -471,6 +590,20 @@ mod tests {
             "owner/unused-repo",
             "owner/unused-repo should be unused"
         );
+    }
+
+    #[test]
+    fn confirm_removal_accepts_yes_input() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = ConfirmInputGuard::new(Some("y\n".to_string()));
+        assert!(confirm_removal().unwrap());
+    }
+
+    #[test]
+    fn confirm_removal_rejects_non_yes_input() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = ConfirmInputGuard::new(Some("no\n".to_string()));
+        assert!(!confirm_removal().unwrap());
     }
 
     #[test]
@@ -680,6 +813,176 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prune_parallel_missing_repo_with_force_removes_plugin() {
+        let _jobs = JobsGuard::set(1);
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_fish_config();
+
+        let mut ctx = test_env.create_context();
+        let result = prune_parallel(true, true, &mut ctx).await;
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(
+            lock_file.plugins.len(),
+            1,
+            "Unused plugin should be removed when --force is set"
+        );
+        assert_eq!(lock_file.plugins[0].repo.as_str(), "owner/used-repo");
+        assert!(
+            fs::metadata(test_env.fish_config_dir.join("functions/unused.fish")).is_err(),
+            "Unused plugin file should be deleted"
+        );
+        assert!(
+            fs::metadata(test_env.fish_config_dir.join("functions/used.fish")).is_ok(),
+            "Used plugin file should still exist"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prune_parallel_does_not_save_when_no_sources_removed() {
+        let _jobs = JobsGuard::set(1);
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+
+        let mut perms = fs::metadata(&test_env.lock_file_path)
+            .unwrap()
+            .permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&test_env.lock_file_path, perms).unwrap();
+
+        let mut ctx = test_env.create_context();
+        let result = prune_parallel(false, true, &mut ctx).await;
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(
+            lock_file.plugins.len(),
+            2,
+            "Lock file should remain unchanged when no sources are removed"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prune_parallel_aborts_without_yes_when_confirm_false() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config { plugins: None });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.unused_plugin],
+        });
+
+        let mut ctx = test_env.create_context();
+        let result = prune_parallel_with_confirm(false, false, &mut ctx, || Ok(false)).await;
+        assert!(result.is_err_and(|e| e.to_string().contains("Prune process aborted.")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prune_parallel_skips_confirm_when_yes() {
+        let _jobs = JobsGuard::set(1);
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config { plugins: None });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+        test_env.setup_fish_config();
+
+        let mut ctx = test_env.create_context();
+        let result = prune_parallel_with_confirm(true, true, &mut ctx, || Ok(false)).await;
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(lock_file.plugins.len(), 0, "All plugins should be removed");
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/unused-repo")).is_err(),
+            "Unused repo directory should be deleted"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prune_parallel_missing_repo_without_force_keeps_lock() {
+        let _jobs = JobsGuard::set(1);
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(vec![
+            test_env.lock_file.as_ref().unwrap().plugins[0].repo.clone(),
+        ]);
+
+        let mut ctx = test_env.create_context();
+        let result = prune_parallel_with_confirm(false, true, &mut ctx, || Ok(true)).await;
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(
+            lock_file.plugins.len(),
+            2,
+            "Unused plugin should not be removed without --force"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prune_parallel_removes_unused_plugin_and_keeps_used() {
+        let _jobs = JobsGuard::set(1);
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+        test_env.setup_fish_config();
+
+        let mut ctx = test_env.create_context();
+        let result = prune_parallel_with_confirm(false, true, &mut ctx, || Ok(true)).await;
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert_eq!(
+            lock_file.plugins.len(),
+            1,
+            "Unused plugin should be removed"
+        );
+        assert_eq!(lock_file.plugins[0].repo.as_str(), "owner/used-repo");
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/unused-repo")).is_err(),
+            "Unused repo directory should be deleted"
+        );
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/used-repo")).is_ok(),
+            "Used repo directory should still exist"
+        );
+    }
+
     #[test]
     fn test_prune_dry_run() {
         let mut test_env = TestEnvironmentSetup::new();
@@ -715,6 +1018,62 @@ mod tests {
         let joined = logs.join("\n");
         assert!(joined.contains("Plugins that would be removed:"));
         assert!(joined.contains("owner/unused-repo"));
+        assert!(!joined.contains("owner/used-repo"));
+        assert!(!joined.contains("Repository directory at"));
         assert!(!joined.contains("\u{1b}["));
+    }
+
+    #[test]
+    fn dry_run_warns_when_repo_missing_without_force() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+
+        let mut ctx = test_env.create_context();
+        let (logs, result) = capture_logs(|| dry_run(false, &mut ctx));
+        assert!(result.is_ok());
+
+        let joined = logs.join("\n");
+        assert!(joined.contains("Repository directory at"));
+        assert!(joined.contains("If you want to remove these files, use the --force flag."));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_removes_unused_plugin() {
+        let _jobs = JobsGuard::set(1);
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+        test_env.setup_fish_config();
+
+        let args = PruneArgs {
+            force: false,
+            dry_run: false,
+            yes: true,
+        };
+
+        let result = with_env_async(&test_env, || run(&args)).await;
+        assert!(result.is_ok());
+
+        let lock_file = lock_file::load(&test_env.lock_file_path).unwrap();
+        assert_eq!(
+            lock_file.plugins.len(),
+            1,
+            "Unused plugin should be removed"
+        );
+        assert_eq!(lock_file.plugins[0].repo.as_str(), "owner/used-repo");
     }
 }
