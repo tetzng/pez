@@ -155,3 +155,151 @@ impl PluginFile {
         config_dir.join(self.dir.as_str()).join(&self.name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plugin_repo(owner: &str, repo: &str) -> PluginRepo {
+        PluginRepo::new(None, owner.to_string(), repo.to_string()).expect("valid repo")
+    }
+
+    fn plugin_with(source: &str, name: &str) -> Plugin {
+        Plugin {
+            name: name.to_string(),
+            repo: plugin_repo("owner", "repo"),
+            source: source.to_string(),
+            commit_sha: "deadbeef".to_string(),
+            files: vec![],
+        }
+    }
+
+    #[test]
+    fn add_plugin_rejects_duplicate_source() {
+        let mut lock = init();
+        lock.add_plugin(plugin_with("https://example.com/owner/repo", "alpha"))
+            .expect("add initial plugin");
+
+        let err = lock
+            .add_plugin(plugin_with("https://example.com/owner/repo", "beta"))
+            .expect_err("expected duplicate source error");
+        assert!(
+            err.to_string().contains("Plugin already exists"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn add_plugin_rejects_duplicate_name() {
+        let mut lock = init();
+        lock.add_plugin(plugin_with("https://example.com/owner/repo", "alpha"))
+            .expect("add initial plugin");
+
+        let err = lock
+            .add_plugin(plugin_with("https://example.com/owner/other", "alpha"))
+            .expect_err("expected duplicate name error");
+        assert!(
+            err.to_string().contains("Plugin already exists"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn merge_plugins_updates_existing_and_adds_new() {
+        let mut lock = LockFile {
+            version: 1,
+            plugins: vec![
+                Plugin {
+                    name: "alpha".to_string(),
+                    repo: plugin_repo("owner", "alpha"),
+                    source: "https://example.com/owner/alpha".to_string(),
+                    commit_sha: "old".to_string(),
+                    files: vec![],
+                },
+                Plugin {
+                    name: "beta".to_string(),
+                    repo: plugin_repo("owner", "beta"),
+                    source: "https://example.com/owner/beta".to_string(),
+                    commit_sha: "stable".to_string(),
+                    files: vec![],
+                },
+            ],
+        };
+
+        let updated_alpha = Plugin {
+            name: "alpha".to_string(),
+            repo: plugin_repo("owner", "alpha"),
+            source: "https://example.com/owner/alpha".to_string(),
+            commit_sha: "new".to_string(),
+            files: vec![],
+        };
+        let new_plugin = Plugin {
+            name: "gamma".to_string(),
+            repo: plugin_repo("owner", "gamma"),
+            source: "https://example.com/owner/gamma".to_string(),
+            commit_sha: "fresh".to_string(),
+            files: vec![],
+        };
+
+        lock.merge_plugins(vec![updated_alpha.clone(), new_plugin.clone()]);
+
+        let alpha = lock
+            .plugins
+            .iter()
+            .find(|p| p.source == updated_alpha.source)
+            .expect("alpha present");
+        assert_eq!(alpha.commit_sha, "new");
+
+        let beta = lock
+            .plugins
+            .iter()
+            .find(|p| p.source == "https://example.com/owner/beta")
+            .expect("beta present");
+        assert_eq!(beta.commit_sha, "stable");
+
+        let gamma = lock
+            .plugins
+            .iter()
+            .find(|p| p.source == new_plugin.source)
+            .expect("gamma present");
+        assert_eq!(gamma.commit_sha, "fresh");
+    }
+
+    #[test]
+    fn contains_repo_returns_false_for_missing_repo() {
+        let lock = LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: "alpha".to_string(),
+                repo: plugin_repo("owner", "alpha"),
+                source: "https://example.com/owner/alpha".to_string(),
+                commit_sha: "deadbeef".to_string(),
+                files: vec![],
+            }],
+        };
+
+        let missing = plugin_repo("owner", "missing");
+        assert!(!lock.contains_repo(&missing));
+    }
+
+    #[test]
+    fn plugin_get_name_prefers_explicit_name_or_last_path_segment() {
+        let named = Plugin {
+            name: "custom".to_string(),
+            repo: plugin_repo("owner", "repo"),
+            source: "https://example.com/owner/repo".to_string(),
+            commit_sha: "deadbeef".to_string(),
+            files: vec![],
+        };
+        assert_eq!(named.get_name(), "custom");
+
+        let unnamed = Plugin {
+            name: "".to_string(),
+            repo: plugin_repo("owner", "repo"),
+            source: "https://example.com/owner/repo".to_string(),
+            commit_sha: "deadbeef".to_string(),
+            files: vec![],
+        };
+        assert_eq!(unnamed.get_name(), "repo");
+    }
+}

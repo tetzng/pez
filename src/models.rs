@@ -403,6 +403,74 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn target_dir_parsing_accepts_all_variants() {
+        let cases = [
+            ("functions", TargetDir::Functions),
+            ("completions", TargetDir::Completions),
+            ("conf.d", TargetDir::ConfD),
+            ("themes", TargetDir::Themes),
+        ];
+
+        for (raw, expected) in cases {
+            let parsed: TargetDir = raw.parse().expect("parse target dir");
+            assert_eq!(parsed, expected);
+        }
+
+        let invalid = "not-a-dir";
+        assert!(invalid.parse::<TargetDir>().is_err());
+    }
+
+    #[test]
+    fn plugin_repo_validation_rejects_invalid_segments() {
+        let bad_owner = PluginRepo::new(None, "owner!".to_string(), "repo".to_string());
+        assert!(bad_owner.is_err());
+
+        let bad_repo = PluginRepo::new(None, "owner".to_string(), "repo.".to_string());
+        assert!(bad_repo.is_err());
+
+        let bad_host_leading = PluginRepo::new(
+            Some(".github.com".to_string()),
+            "owner".to_string(),
+            "repo".to_string(),
+        );
+        assert!(bad_host_leading.is_err());
+
+        let bad_host_trailing = PluginRepo::new(
+            Some("github.com.".to_string()),
+            "owner".to_string(),
+            "repo".to_string(),
+        );
+        assert!(bad_host_trailing.is_err());
+    }
+
+    #[test]
+    fn parse_standard_url_requires_owner_and_repo() {
+        let missing_repo = PluginRepo::from_remote_url("https://github.com/owner");
+        assert!(missing_repo.is_none());
+
+        let file_scheme = PluginRepo::from_remote_url("file:///tmp/owner/repo");
+        assert!(file_scheme.is_none());
+    }
+
+    #[test]
+    fn parse_scp_like_requires_owner_and_repo() {
+        let missing_repo = PluginRepo::from_remote_url("git@github.com:owner");
+        assert!(missing_repo.is_none());
+
+        let http_like = PluginRepo::from_remote_url("https://github.com/owner/repo");
+        assert!(http_like.is_some());
+    }
+
+    #[test]
+    fn install_target_round_trip_preserves_raw() {
+        let target = InstallTarget {
+            raw: "owner/repo".to_string(),
+        };
+        let raw: String = target.into();
+        assert_eq!(raw, "owner/repo");
+    }
 }
 
 /// A user-supplied install target that can be a repo, URL, or local path.
