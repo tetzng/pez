@@ -5,13 +5,34 @@ use std::{collections::HashSet, path};
 use tracing::{info, warn};
 
 #[derive(Serialize)]
-struct DoctorCheck<'a> {
-    name: &'a str,
-    status: &'a str, // ok | warn | error
+pub(crate) struct DoctorCheck {
+    name: &'static str,
+    status: &'static str, // ok | warn | error
     details: String,
 }
 
-pub(crate) fn run(args: &cli::DoctorArgs) -> anyhow::Result<()> {
+pub(crate) fn run(args: &cli::DoctorArgs) -> anyhow::Result<Vec<DoctorCheck>> {
+    let checks = collect_checks()?;
+
+    match args.format {
+        Some(cli::DoctorFormat::Json) => {
+            println!("{}", serde_json::to_string_pretty(&json!(checks))?);
+        }
+        None => {
+            info!("pez doctor checks:");
+            for line in render_plain_lines(&checks) {
+                println!("{line}");
+            }
+            if has_error(&checks) {
+                warn!("Errors detected. Please resolve the above items.");
+            }
+        }
+    }
+
+    Ok(checks)
+}
+
+fn collect_checks() -> anyhow::Result<Vec<DoctorCheck>> {
     let mut checks: Vec<DoctorCheck> = Vec::new();
 
     match utils::load_config() {
@@ -122,25 +143,181 @@ pub(crate) fn run(args: &cli::DoctorArgs) -> anyhow::Result<()> {
         });
     }
 
-    match args.format {
-        Some(cli::DoctorFormat::Json) => {
-            println!("{}", serde_json::to_string_pretty(&json!(checks))?);
+    Ok(checks)
+}
+
+fn status_prefix(status: &str) -> &'static str {
+    match status {
+        "ok" => "✔",
+        "warn" => "⚠",
+        _ => "✖",
+    }
+}
+
+fn render_plain_lines(checks: &[DoctorCheck]) -> Vec<String> {
+    checks
+        .iter()
+        .map(|c| format!("{} {:<12} - {}", status_prefix(c.status), c.name, c.details))
+        .collect()
+}
+
+fn has_error(checks: &[DoctorCheck]) -> bool {
+    checks.iter().any(|c| c.status == "error")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config;
+    use crate::lock_file::{LockFile, Plugin, PluginFile};
+    use crate::models::{PluginRepo, TargetDir};
+    use crate::tests_support::env::TestEnvironmentSetup;
+    use crate::tests_support::log::capture_logs;
+    use std::collections::HashMap;
+
+    fn with_env<F: FnOnce() -> R, R>(env: &TestEnvironmentSetup, f: F) -> R {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let prev_fc = std::env::var_os("__fish_config_dir");
+        let prev_pc = std::env::var_os("PEZ_CONFIG_DIR");
+        let prev_pd = std::env::var_os("PEZ_DATA_DIR");
+        unsafe {
+            std::env::set_var("__fish_config_dir", &env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
         }
-        None => {
-            info!("pez doctor checks:");
-            for c in &checks {
-                let prefix = match c.status {
-                    "ok" => "✔",
-                    "warn" => "⚠",
-                    _ => "✖",
-                };
-                println!("{} {:<12} - {}", prefix, c.name, c.details);
+        let result = f();
+        unsafe {
+            if let Some(v) = prev_fc {
+                std::env::set_var("__fish_config_dir", v);
+            } else {
+                std::env::remove_var("__fish_config_dir");
             }
-            if checks.iter().any(|c| c.status == "error") {
-                warn!("Errors detected. Please resolve the above items.");
+            if let Some(v) = prev_pc {
+                std::env::set_var("PEZ_CONFIG_DIR", v);
+            } else {
+                std::env::remove_var("PEZ_CONFIG_DIR");
+            }
+            if let Some(v) = prev_pd {
+                std::env::set_var("PEZ_DATA_DIR", v);
+            } else {
+                std::env::remove_var("PEZ_DATA_DIR");
             }
         }
+        result
     }
 
-    Ok(())
+    #[test]
+    fn doctor_reports_missing_repos_and_files() {
+        let mut env = TestEnvironmentSetup::new();
+        env.setup_config(config::init());
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".into(),
+            repo: "pkg".into(),
+        };
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: "pkg".into(),
+                repo: repo.clone(),
+                source: repo.default_remote_source(),
+                commit_sha: "abc".into(),
+                files: vec![PluginFile {
+                    dir: TargetDir::ConfD,
+                    name: "pkg.fish".into(),
+                }],
+            }],
+        });
+
+        with_env(&env, || {
+            let checks = collect_checks().unwrap();
+            let mut statuses = HashMap::new();
+            for check in checks {
+                statuses.insert(check.name, check.status);
+            }
+            assert_eq!(statuses.get("config"), Some(&"ok"));
+            assert_eq!(statuses.get("lock_file"), Some(&"ok"));
+            assert_eq!(statuses.get("fish_config_dir"), Some(&"ok"));
+            assert_eq!(statuses.get("pez_data_dir"), Some(&"ok"));
+            assert_eq!(statuses.get("repos"), Some(&"warn"));
+            assert_eq!(statuses.get("target_files"), Some(&"warn"));
+            assert_eq!(statuses.get("duplicates"), Some(&"ok"));
+        });
+    }
+
+    #[test]
+    fn render_plain_lines_prefixes_statuses() {
+        let checks = vec![
+            DoctorCheck {
+                name: "ok",
+                status: "ok",
+                details: "one".into(),
+            },
+            DoctorCheck {
+                name: "warn",
+                status: "warn",
+                details: "two".into(),
+            },
+            DoctorCheck {
+                name: "error",
+                status: "error",
+                details: "three".into(),
+            },
+        ];
+        let lines = render_plain_lines(&checks);
+        assert!(lines[0].starts_with("✔ "));
+        assert!(lines[1].starts_with("⚠ "));
+        assert!(lines[2].starts_with("✖ "));
+    }
+
+    #[test]
+    fn has_error_detects_errors() {
+        let ok_checks = vec![DoctorCheck {
+            name: "config",
+            status: "ok",
+            details: "ok".into(),
+        }];
+        assert!(!has_error(&ok_checks));
+
+        let err_checks = vec![DoctorCheck {
+            name: "duplicates",
+            status: "error",
+            details: "oops".into(),
+        }];
+        assert!(has_error(&err_checks));
+    }
+
+    #[test]
+    fn run_does_not_warn_without_errors() {
+        let mut env = TestEnvironmentSetup::new();
+        env.setup_config(config::init());
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".into(),
+            repo: "pkg".into(),
+        };
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: "pkg".into(),
+                repo: repo.clone(),
+                source: repo.default_remote_source(),
+                commit_sha: "abc".into(),
+                files: vec![PluginFile {
+                    dir: TargetDir::ConfD,
+                    name: "pkg.fish".into(),
+                }],
+            }],
+        });
+
+        with_env(&env, || {
+            let args = cli::DoctorArgs { format: None };
+            let (logs, result) = capture_logs(|| run(&args));
+            result.unwrap();
+            assert!(
+                !logs.iter().any(|msg| msg.contains("Errors detected")),
+                "unexpected warning logs: {logs:?}"
+            );
+        });
+    }
 }

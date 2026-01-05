@@ -2,7 +2,6 @@ use crate::{cli, config, git, lock_file::Plugin, resolver, utils};
 
 use console::Emoji;
 use serde_json::json;
-use std::io;
 use tabled::{Table, Tabled};
 use tracing::{info, warn};
 
@@ -29,11 +28,11 @@ struct OutdatedPlugin {
     latest: String,
 }
 
-pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
+pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<String> {
     let result = utils::load_lock_file();
     if result.is_err() {
         info!("No plugins installed!");
-        return Ok(());
+        return Ok(String::new());
     }
 
     let config_opt = utils::load_config().ok().map(|(c, _)| c);
@@ -41,7 +40,7 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
         Ok(v) => v,
         Err(_) => {
             info!("No plugins installed!");
-            return Ok(());
+            return Ok(String::new());
         }
     };
     let mut plugins = lock_file.plugins.clone();
@@ -55,10 +54,10 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
     let plugins = &plugins;
     if plugins.is_empty() {
         info!("No plugins installed!");
-        return Ok(());
+        return Ok(String::new());
     }
 
-    if args.outdated {
+    let output = if args.outdated {
         match args.format.clone().unwrap_or(cli::ListFormat::Plain) {
             cli::ListFormat::Table => list_outdated_table(plugins, config_opt.as_ref())?,
             cli::ListFormat::Json => list_outdated_json(plugins, config_opt.as_ref())?,
@@ -66,29 +65,33 @@ pub(crate) fn run(args: &cli::ListArgs) -> anyhow::Result<()> {
         }
     } else {
         match args.format.clone().unwrap_or(cli::ListFormat::Plain) {
-            cli::ListFormat::Table => display_plugins_in_table(plugins, config_opt.as_ref()),
+            cli::ListFormat::Table => list_table(plugins, config_opt.as_ref()),
             cli::ListFormat::Json => list_json(plugins, config_opt.as_ref())?,
-            cli::ListFormat::Plain => list(plugins)?,
+            cli::ListFormat::Plain => list(plugins),
         }
+    };
+
+    if !output.is_empty() {
+        print!("{output}");
     }
 
-    Ok(())
+    Ok(output)
 }
 
-fn list(plugins: &[Plugin]) -> anyhow::Result<()> {
-    display_plugins(plugins, io::stdout())?;
-    Ok(())
+fn list(plugins: &[Plugin]) -> String {
+    render_plugins_plain(plugins)
 }
 
-fn display_plugins<W: io::Write>(plugins: &[Plugin], mut writer: W) -> anyhow::Result<()> {
+fn render_plugins_plain(plugins: &[Plugin]) -> String {
+    let mut output = String::new();
     for plugin in plugins {
-        writeln!(writer, "{}", plugin.repo)?;
+        output.push_str(&plugin.repo.as_str());
+        output.push('\n');
     }
-
-    Ok(())
+    output
 }
 
-fn display_plugins_in_table(plugins: &[Plugin], config: Option<&crate::config::Config>) {
+fn list_table(plugins: &[Plugin], config: Option<&crate::config::Config>) -> String {
     fn short7(s: &str) -> String {
         s.chars().take(7).collect()
     }
@@ -150,22 +153,20 @@ fn display_plugins_in_table(plugins: &[Plugin], config: Option<&crate::config::C
         })
         .collect::<Vec<PluginRow>>();
     let table = Table::new(&plugin_rows);
-    println!("{table}");
+    table.to_string()
 }
 
-fn list_outdated(plugins: &[Plugin], config: Option<&config::Config>) -> anyhow::Result<()> {
+fn list_outdated(plugins: &[Plugin], config: Option<&config::Config>) -> anyhow::Result<String> {
     let outdated_plugins = get_outdated_plugins(plugins, config)?;
     if outdated_plugins.is_empty() {
         info!("{}All plugins are up to date!", Emoji("🎉 ", ""));
-        return Ok(());
+        return Ok(String::new());
     }
     let plugins_only: Vec<Plugin> = outdated_plugins
         .into_iter()
         .map(|entry| entry.plugin)
         .collect();
-    display_plugins(&plugins_only, io::stdout())?;
-
-    Ok(())
+    Ok(render_plugins_plain(&plugins_only))
 }
 
 fn get_outdated_plugins(
@@ -260,14 +261,17 @@ fn get_outdated_plugins(
     Ok(outdated_plugins)
 }
 
-fn list_outdated_table(plugins: &[Plugin], config: Option<&config::Config>) -> anyhow::Result<()> {
+fn list_outdated_table(
+    plugins: &[Plugin],
+    config: Option<&config::Config>,
+) -> anyhow::Result<String> {
     fn short7(s: &str) -> String {
         s.chars().take(7).collect()
     }
     let outdated_plugins = get_outdated_plugins(plugins, config)?;
     if outdated_plugins.is_empty() {
         info!("{}All plugins are up to date!", Emoji("🎉 ", ""));
-        return Ok(());
+        return Ok(String::new());
     }
 
     let plugin_rows = outdated_plugins
@@ -281,12 +285,10 @@ fn list_outdated_table(plugins: &[Plugin], config: Option<&config::Config>) -> a
         })
         .collect::<Vec<PluginOutdatedRow>>();
     let table = Table::new(&plugin_rows);
-    println!("{table}");
-
-    Ok(())
+    Ok(table.to_string())
 }
 
-fn list_json(plugins: &[Plugin], config: Option<&crate::config::Config>) -> anyhow::Result<()> {
+fn list_json(plugins: &[Plugin], config: Option<&crate::config::Config>) -> anyhow::Result<String> {
     fn selector_of(
         cfg: Option<&crate::config::Config>,
         repo: &crate::models::PluginRepo,
@@ -340,15 +342,17 @@ fn list_json(plugins: &[Plugin], config: Option<&crate::config::Config>) -> anyh
             }))
             .collect::<Vec<_>>()
     );
-    println!("{}", serde_json::to_string_pretty(&value)?);
-    Ok(())
+    Ok(serde_json::to_string_pretty(&value)?)
 }
 
-fn list_outdated_json(plugins: &[Plugin], config: Option<&config::Config>) -> anyhow::Result<()> {
+fn list_outdated_json(
+    plugins: &[Plugin],
+    config: Option<&config::Config>,
+) -> anyhow::Result<String> {
     let outdated_plugins = get_outdated_plugins(plugins, config)?;
     if outdated_plugins.is_empty() {
         info!("{}All plugins are up to date!", Emoji("🎉 ", ""));
-        return Ok(());
+        return Ok(String::new());
     }
     let value = json!(
         outdated_plugins
@@ -364,8 +368,7 @@ fn list_outdated_json(plugins: &[Plugin], config: Option<&config::Config>) -> an
             })
             .collect::<Vec<_>>()
     );
-    println!("{}", serde_json::to_string_pretty(&value)?);
-    Ok(())
+    Ok(serde_json::to_string_pretty(&value)?)
 }
 
 fn describe_selection(selection: &resolver::Selection) -> String {
@@ -417,13 +420,85 @@ mod tests {
             },
         ];
 
-        let mut output = io::Cursor::new(Vec::new());
-        display_plugins(&plugins, &mut output).unwrap();
+        let output = render_plugins_plain(&plugins);
+        assert_eq!(output, "owner/repo\nowner/repo2\n");
+    }
 
-        let actual_output = String::from_utf8(output.into_inner()).unwrap();
-        let expected_output = "owner/repo\nowner/repo2\n";
+    #[test]
+    fn list_run_filters_remote_sources() {
+        let mut env = TestEnvironmentSetup::new();
+        let (_remote_repo, _local_repo) = setup_list_env(&mut env);
+        let args = cli::ListArgs {
+            format: Some(cli::ListFormat::Plain),
+            outdated: false,
+            filter: Some(cli::ListFilter::Remote),
+        };
 
-        assert_eq!(actual_output, expected_output);
+        let output = with_env(&env, || run(&args).unwrap());
+        assert!(output.contains("owner/remote"));
+        assert!(!output.contains("owner/local"));
+    }
+
+    #[test]
+    fn list_table_includes_selector_and_short_commit() {
+        let mut env = TestEnvironmentSetup::new();
+        setup_list_env(&mut env);
+        let args = cli::ListArgs {
+            format: Some(cli::ListFormat::Table),
+            outdated: false,
+            filter: None,
+        };
+
+        let output = with_env(&env, || run(&args).unwrap());
+        assert!(output.contains("branch:main"));
+        assert!(output.contains("abcdefg"));
+    }
+
+    #[test]
+    fn list_json_includes_selector() {
+        let mut env = TestEnvironmentSetup::new();
+        let (remote_repo, _local_repo) = setup_list_env(&mut env);
+        let args = cli::ListArgs {
+            format: Some(cli::ListFormat::Json),
+            outdated: false,
+            filter: None,
+        };
+
+        let output = with_env(&env, || run(&args).unwrap());
+        let remote = remote_repo.as_str();
+        let value: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        let plugin = value
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["repo"].as_str() == Some(remote.as_str()))
+            .expect("remote plugin missing");
+        assert_eq!(plugin["selector"].as_str(), Some("branch:main"));
+    }
+
+    #[test]
+    fn describe_selection_formats_variants() {
+        assert_eq!(
+            describe_selection(&resolver::Selection::DefaultHead),
+            "origin/HEAD"
+        );
+        assert_eq!(describe_selection(&resolver::Selection::Latest), "latest");
+        assert_eq!(
+            describe_selection(&resolver::Selection::Branch("main".into())),
+            "branch:main"
+        );
+        assert_eq!(
+            describe_selection(&resolver::Selection::Tag("v1".into())),
+            "tag:v1"
+        );
+        assert_eq!(
+            describe_selection(&resolver::Selection::Commit("abc".into())),
+            "commit:abc"
+        );
+        assert_eq!(
+            describe_selection(&resolver::Selection::Version("1.2.3".into())),
+            "version:1.2.3"
+        );
     }
 
     struct EnvOverride {
@@ -454,6 +529,62 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn with_env<F: FnOnce() -> R, R>(env: &TestEnvironmentSetup, f: F) -> R {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvOverride::new(&["__fish_config_dir", "PEZ_CONFIG_DIR", "PEZ_DATA_DIR"]);
+        unsafe {
+            std::env::set_var("__fish_config_dir", &env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
+        }
+        f()
+    }
+
+    fn setup_list_env(env: &mut TestEnvironmentSetup) -> (PluginRepo, PluginRepo) {
+        let remote_repo = PluginRepo {
+            host: None,
+            owner: "owner".to_string(),
+            repo: "remote".to_string(),
+        };
+        let local_repo = PluginRepo {
+            host: None,
+            owner: "owner".to_string(),
+            repo: "local".to_string(),
+        };
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![
+                Plugin {
+                    name: "remote".to_string(),
+                    repo: remote_repo.clone(),
+                    source: remote_repo.default_remote_source(),
+                    commit_sha: "abcdefghi".to_string(),
+                    files: vec![],
+                },
+                Plugin {
+                    name: "local".to_string(),
+                    repo: local_repo.clone(),
+                    source: "/tmp/local".to_string(),
+                    commit_sha: "localsha".to_string(),
+                    files: vec![],
+                },
+            ],
+        });
+        env.setup_config(config::Config {
+            plugins: Some(vec![PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: remote_repo.clone(),
+                    version: None,
+                    branch: Some("main".to_string()),
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        });
+        (remote_repo, local_repo)
     }
 
     fn clone_into_data_dir(origin: &Path, env: &TestEnvironmentSetup, repo: &PluginRepo) -> String {

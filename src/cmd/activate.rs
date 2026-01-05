@@ -2,8 +2,10 @@
 ///
 /// Prints Fish wrapper code to stdout. Keep stdout clean of logs so it can be
 /// piped into `source`.
-pub(crate) fn run_fish() {
-    print!("{}", fish_script());
+pub(crate) fn run_fish() -> String {
+    let script = fish_script();
+    print!("{script}");
+    script
 }
 
 fn fish_script() -> String {
@@ -165,5 +167,13 @@ mod tests {
         assert!(text.contains("psub -f -s .pez_uninstall"));
         assert!(text.contains("cat $stdin_file | __pez_fish_source_and_emit uninstall"));
         assert!(text.contains("cat $stdin_file | env PEZ_SUPPRESS_EMIT=1 command pez $argv"));
+    }
+
+    #[test]
+    fn run_fish_returns_script() {
+        let script = run_fish();
+        assert_eq!(script, fish_script());
+        assert!(script.contains("__pez_activate_version"));
+        assert!(script.contains("function pez --wraps pez"));
     }
 }
