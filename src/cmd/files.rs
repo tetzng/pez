@@ -451,4 +451,60 @@ mod tests {
             .expect("help should not error");
         assert!(repos.is_none());
     }
+
+    #[test]
+    fn should_skip_from_parse_returns_true_for_help() {
+        let res = should_skip_from_parse(&FilesFrom::Install, &["--help".into()]).unwrap();
+        assert!(res);
+    }
+
+    #[test]
+    fn should_skip_from_parse_errors_on_invalid_args() {
+        let err = should_skip_from_parse(&FilesFrom::Install, &["--nope".into()]);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn run_outputs_json_paths() {
+        let mut env = TestEnvironmentSetup::new();
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".into(),
+            repo: "pkg".into(),
+        };
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: "pkg".into(),
+                repo: repo.clone(),
+                source: repo.default_remote_source(),
+                commit_sha: "abc".into(),
+                files: vec![PluginFile {
+                    dir: TargetDir::ConfD,
+                    name: "a.fish".into(),
+                }],
+            }],
+        });
+        let confd = env.fish_config_dir.join(TargetDir::ConfD.as_str());
+        std::fs::create_dir_all(&confd).unwrap();
+        std::fs::write(confd.join("a.fish"), "").unwrap();
+
+        let args = FilesArgs {
+            plugins: Some(vec!["owner/pkg".into()]),
+            all: false,
+            dir: FilesDir::ConfD,
+            format: FilesFormat::Json,
+            from: None,
+            passthrough: vec![],
+        };
+
+        with_env(&env, || {
+            let paths = run(&args).unwrap();
+            let json = render_paths_json(&paths).unwrap();
+            let paths: Vec<String> = serde_json::from_str(&json).unwrap();
+            assert_eq!(paths.len(), 1);
+            assert!(paths[0].ends_with("conf.d/a.fish"));
+            Ok(())
+        });
+    }
 }

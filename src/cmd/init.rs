@@ -43,6 +43,7 @@ fn create_config(config_dir: &path::Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests_support::log::env_lock;
     use std::fs;
 
     #[test]
@@ -73,5 +74,41 @@ mod tests {
             result.unwrap_err().to_string(),
             format!("{} already exists", config_path.display())
         );
+    }
+
+    #[test]
+    fn test_create_config_creates_missing_dir() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_dir = temp_dir.path().join("nested");
+        let config_path = config_dir.join("pez.toml");
+
+        let result = create_config(&config_dir);
+        assert!(result.is_ok());
+        assert!(config_dir.exists());
+        assert!(config_path.exists());
+    }
+
+    #[test]
+    fn test_run_creates_config_in_env_dir() {
+        let _lock = env_lock().lock().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_dir = temp_dir.path().join("pez-config");
+        let prev_pc = std::env::var_os("PEZ_CONFIG_DIR");
+        unsafe {
+            std::env::set_var("PEZ_CONFIG_DIR", &config_dir);
+        }
+
+        let result = run();
+
+        unsafe {
+            if let Some(v) = prev_pc {
+                std::env::set_var("PEZ_CONFIG_DIR", v);
+            } else {
+                std::env::remove_var("PEZ_CONFIG_DIR");
+            }
+        }
+
+        assert!(result.is_ok());
+        assert!(config_dir.join("pez.toml").exists());
     }
 }

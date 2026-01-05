@@ -424,6 +424,83 @@ mod tests {
         assert_eq!(output, "owner/repo\nowner/repo2\n");
     }
 
+    #[test]
+    fn list_run_filters_remote_sources() {
+        let mut env = TestEnvironmentSetup::new();
+        let (_remote_repo, _local_repo) = setup_list_env(&mut env);
+        let args = cli::ListArgs {
+            format: Some(cli::ListFormat::Plain),
+            outdated: false,
+            filter: Some(cli::ListFilter::Remote),
+        };
+
+        let output = with_env(&env, || run(&args).unwrap());
+        assert!(output.contains("owner/remote"));
+        assert!(!output.contains("owner/local"));
+    }
+
+    #[test]
+    fn list_table_includes_selector_and_short_commit() {
+        let mut env = TestEnvironmentSetup::new();
+        setup_list_env(&mut env);
+        let args = cli::ListArgs {
+            format: Some(cli::ListFormat::Table),
+            outdated: false,
+            filter: None,
+        };
+
+        let output = with_env(&env, || run(&args).unwrap());
+        assert!(output.contains("branch:main"));
+        assert!(output.contains("abcdefg"));
+    }
+
+    #[test]
+    fn list_json_includes_selector() {
+        let mut env = TestEnvironmentSetup::new();
+        let (remote_repo, _local_repo) = setup_list_env(&mut env);
+        let args = cli::ListArgs {
+            format: Some(cli::ListFormat::Json),
+            outdated: false,
+            filter: None,
+        };
+
+        let output = with_env(&env, || run(&args).unwrap());
+        let remote = remote_repo.as_str();
+        let value: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        let plugin = value
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["repo"].as_str() == Some(remote.as_str()))
+            .expect("remote plugin missing");
+        assert_eq!(plugin["selector"].as_str(), Some("branch:main"));
+    }
+
+    #[test]
+    fn describe_selection_formats_variants() {
+        assert_eq!(
+            describe_selection(&resolver::Selection::DefaultHead),
+            "origin/HEAD"
+        );
+        assert_eq!(describe_selection(&resolver::Selection::Latest), "latest");
+        assert_eq!(
+            describe_selection(&resolver::Selection::Branch("main".into())),
+            "branch:main"
+        );
+        assert_eq!(
+            describe_selection(&resolver::Selection::Tag("v1".into())),
+            "tag:v1"
+        );
+        assert_eq!(
+            describe_selection(&resolver::Selection::Commit("abc".into())),
+            "commit:abc"
+        );
+        assert_eq!(
+            describe_selection(&resolver::Selection::Version("1.2.3".into())),
+            "version:1.2.3"
+        );
+    }
+
     struct EnvOverride {
         entries: Vec<(&'static str, Option<std::ffi::OsString>)>,
     }
@@ -452,6 +529,62 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn with_env<F: FnOnce() -> R, R>(env: &TestEnvironmentSetup, f: F) -> R {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvOverride::new(&["__fish_config_dir", "PEZ_CONFIG_DIR", "PEZ_DATA_DIR"]);
+        unsafe {
+            std::env::set_var("__fish_config_dir", &env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
+        }
+        f()
+    }
+
+    fn setup_list_env(env: &mut TestEnvironmentSetup) -> (PluginRepo, PluginRepo) {
+        let remote_repo = PluginRepo {
+            host: None,
+            owner: "owner".to_string(),
+            repo: "remote".to_string(),
+        };
+        let local_repo = PluginRepo {
+            host: None,
+            owner: "owner".to_string(),
+            repo: "local".to_string(),
+        };
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![
+                Plugin {
+                    name: "remote".to_string(),
+                    repo: remote_repo.clone(),
+                    source: remote_repo.default_remote_source(),
+                    commit_sha: "abcdefghi".to_string(),
+                    files: vec![],
+                },
+                Plugin {
+                    name: "local".to_string(),
+                    repo: local_repo.clone(),
+                    source: "/tmp/local".to_string(),
+                    commit_sha: "localsha".to_string(),
+                    files: vec![],
+                },
+            ],
+        });
+        env.setup_config(config::Config {
+            plugins: Some(vec![PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: remote_repo.clone(),
+                    version: None,
+                    branch: Some("main".to_string()),
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        });
+        (remote_repo, local_repo)
     }
 
     fn clone_into_data_dir(origin: &Path, env: &TestEnvironmentSetup, repo: &PluginRepo) -> String {
