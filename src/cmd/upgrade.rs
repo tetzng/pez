@@ -241,10 +241,16 @@ mod tests {
         let tree = repo.find_tree(tree_id).unwrap();
         let sig = git2::Signature::now("tester", "tester@example.com").unwrap();
         let parent = repo
-            .head()
+            .find_reference("refs/heads/main")
             .ok()
             .and_then(|head| head.target())
-            .and_then(|oid| repo.find_commit(oid).ok());
+            .and_then(|oid| repo.find_commit(oid).ok())
+            .or_else(|| {
+                repo.head()
+                    .ok()
+                    .and_then(|head| head.target())
+                    .and_then(|oid| repo.find_commit(oid).ok())
+            });
         let commit_id = match parent {
             Some(ref parent) => repo
                 .commit(
