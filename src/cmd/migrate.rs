@@ -177,24 +177,33 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
             );
             continue;
         }
+        let looks_like_url =
+            trimmed.contains("://") || trimmed.starts_with("git@") || trimmed.starts_with("ssh://");
+        if looks_like_url {
+            let last_segment = if trimmed.starts_with("git@") {
+                let after_host = trimmed
+                    .split_once(':')
+                    .map(|(_, rest)| rest)
+                    .unwrap_or(trimmed);
+                after_host.rsplit('/').next().unwrap_or(after_host)
+            } else {
+                trimmed.rsplit('/').next().unwrap_or(trimmed)
+            };
+            if let Some((_, suffix)) = last_segment.split_once('@')
+                && !suffix.trim().is_empty()
+            {
+                warn!(
+                    "{}Skipping URL entry with ref suffix: {}",
+                    Emoji("⚠ ", ""),
+                    trimmed
+                );
+                continue;
+            }
+        }
+
         let target = InstallTarget::from_raw(trimmed);
         match target.resolve() {
             Ok(resolved) => {
-                let looks_like_url = resolved.source.contains("://")
-                    || resolved.source.starts_with("git@")
-                    || resolved.source.starts_with("ssh://");
-                let repo_has_ref_suffix = resolved.plugin_repo.repo.contains('@');
-                if looks_like_url
-                    && repo_has_ref_suffix
-                    && matches!(resolved.ref_kind, crate::resolver::RefKind::None)
-                {
-                    warn!(
-                        "{}Skipping URL entry with ref suffix: {}",
-                        Emoji("⚠ ", ""),
-                        trimmed
-                    );
-                    continue;
-                }
                 if resolved.plugin_repo.owner == "jorgebucaran"
                     && resolved.plugin_repo.repo == "fisher"
                 {
@@ -226,7 +235,8 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
 
     if args.force {
         planned = entries.clone();
-        if !args.dry_run {
+        if args.dry_run {
+        } else {
             let specs: Vec<PluginSpec> = planned.iter().map(|entry| entry.spec.clone()).collect();
             cfg.plugins = Some(specs);
         }
@@ -247,7 +257,8 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
                     planned.push(entry.clone());
                 }
             } else {
-                if !args.dry_run {
+                if args.dry_run {
+                } else {
                     list.push(entry.spec.clone());
                 }
                 planned.push(entry.clone());
@@ -255,7 +266,8 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
         }
     } else {
         planned = entries.clone();
-        if !args.dry_run {
+        if args.dry_run {
+        } else {
             let specs: Vec<PluginSpec> = planned.iter().map(|entry| entry.spec.clone()).collect();
             cfg.plugins = Some(specs);
         }
@@ -293,7 +305,11 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config, models::PluginRepo, tests_support::env::TestEnvironmentSetup};
+    use crate::{
+        config,
+        models::{PluginRepo, TargetDir},
+        tests_support::env::TestEnvironmentSetup,
+    };
     use std::fs;
 
     struct EnvGuard(Vec<(&'static str, Option<std::ffi::OsString>)>);
@@ -327,6 +343,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn env_vars(env: &TestEnvironmentSetup) -> Vec<(&'static str, std::ffi::OsString)> {
+        vec![
+            (
+                "PEZ_TARGET_DIR",
+                env.fish_config_dir.clone().into_os_string(),
+            ),
+            ("PEZ_CONFIG_DIR", env.config_dir.clone().into_os_string()),
+            ("PEZ_DATA_DIR", env.data_dir.clone().into_os_string()),
+            ("HOME", env._temp_dir.path().to_path_buf().into_os_string()),
+            ("PEZ_SUPPRESS_EMIT", "1".into()),
+        ]
     }
 
     fn run_migrate(args: &MigrateArgs) -> anyhow::Result<()> {
@@ -569,20 +598,15 @@ mod tests {
     fn skips_url_entries_with_ref_suffix() {
         let mut env = TestEnvironmentSetup::new();
         let _lock = crate::tests_support::log::env_lock().lock().unwrap();
-        let _guard = EnvGuard::set(&[
-            (
-                "PEZ_TARGET_DIR",
-                env.fish_config_dir.clone().into_os_string(),
-            ),
-            ("PEZ_CONFIG_DIR", env.config_dir.clone().into_os_string()),
-        ]);
+        let vars = env_vars(&env);
+        let _guard = EnvGuard::set(&vars);
 
-        env.setup_config(config::Config { plugins: None });
+        env.setup_config(config::init());
 
         let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
         fs::write(
             &fish_plugins_path,
-            "https://gitlab.com/foo/bar@branch:main\n",
+            "owner/valid\nhttps://gitlab.com/foo/bar@branch:main\n",
         )
         .unwrap();
 
@@ -591,10 +615,25 @@ mod tests {
             force: false,
             install: false,
         };
-        run_migrate(&args).unwrap();
+        let (logs, result) = crate::tests_support::log::capture_logs(|| run_migrate(&args));
+        assert!(result.is_ok());
+        assert!(
+            logs.iter()
+                .any(|line| line.contains("Skipping URL entry with ref suffix"))
+        );
+        assert!(
+            !logs
+                .iter()
+                .any(|line| line.contains("Skipping unrecognized entry"))
+        );
 
         let cfg = config::load(&env.config_path).unwrap();
-        assert!(cfg.plugins.is_none());
+        let plugins = cfg.plugins.expect("plugins written");
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(
+            plugins[0].get_plugin_repo().unwrap().as_str(),
+            "owner/valid"
+        );
     }
 
     #[test]
@@ -690,7 +729,17 @@ mod tests {
             force: false,
             install: false,
         };
-        run_migrate(&args).unwrap();
+        let (logs, result) = crate::tests_support::log::capture_logs(|| run_migrate(&args));
+        assert!(result.is_ok());
+        assert!(
+            logs.iter()
+                .any(|line| line.contains("Skipping URL entry with ref suffix"))
+        );
+        assert!(
+            !logs
+                .iter()
+                .any(|line| line.contains("Skipping unrecognized entry"))
+        );
 
         let cfg = config::load(&env.config_path).unwrap();
         assert!(cfg.plugins.is_none());
@@ -789,5 +838,407 @@ mod tests {
             }
             other => panic!("expected Url source, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn migrated_ref_suffixes_render() {
+        assert_eq!(
+            MigratedRef::Version("1.2.3".to_string()).into_suffix(),
+            "1.2.3"
+        );
+        assert_eq!(MigratedRef::Tag("v1".to_string()).into_suffix(), "tag:v1");
+        assert_eq!(
+            MigratedRef::Branch("main".to_string()).into_suffix(),
+            "branch:main"
+        );
+        assert_eq!(
+            MigratedRef::Commit("deadbeef".to_string()).into_suffix(),
+            "commit:deadbeef"
+        );
+    }
+
+    #[test]
+    fn describe_spec_uses_suffix_and_skips_empty_suffix() {
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+        };
+        let with_tag = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo: repo.clone(),
+                version: None,
+                branch: None,
+                tag: Some("v1".to_string()),
+                commit: None,
+            },
+        };
+        assert_eq!(describe_spec(&with_tag), "owner/repo@tag:v1");
+
+        let empty_version = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo,
+                version: Some(String::new()),
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        assert_eq!(describe_spec(&empty_version), "owner/repo");
+    }
+
+    #[test]
+    fn describe_spec_falls_back_to_repo_for_empty_base() {
+        let spec = PluginSpec {
+            name: None,
+            source: PluginSource::Url {
+                url: String::new(),
+                version: Some("1.0.0".to_string()),
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        assert_eq!(describe_spec(&spec), "owner/@1.0.0");
+    }
+
+    #[test]
+    fn should_update_existing_handles_unpinned_sources() {
+        let existing = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo: PluginRepo {
+                    host: None,
+                    owner: "owner".to_string(),
+                    repo: "repo".to_string(),
+                },
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        let incoming = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo: PluginRepo {
+                    host: Some("example.com".to_string()),
+                    owner: "owner".to_string(),
+                    repo: "repo".to_string(),
+                },
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        assert!(should_update_existing(&existing, &incoming));
+    }
+
+    #[test]
+    fn should_update_existing_preserves_custom_url() {
+        let existing = PluginSpec {
+            name: None,
+            source: PluginSource::Url {
+                url: "https://example.com/owner/repo".to_string(),
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        let incoming = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo: PluginRepo {
+                    host: None,
+                    owner: "owner".to_string(),
+                    repo: "repo".to_string(),
+                },
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        assert!(!should_update_existing(&existing, &incoming));
+    }
+
+    #[test]
+    fn should_update_existing_allows_path_updates() {
+        let existing = PluginSpec {
+            name: None,
+            source: PluginSource::Path {
+                path: "/tmp/one".to_string(),
+            },
+        };
+        let incoming = PluginSpec {
+            name: None,
+            source: PluginSource::Path {
+                path: "/tmp/two".to_string(),
+            },
+        };
+        assert!(should_update_existing(&existing, &incoming));
+    }
+
+    #[test]
+    fn should_update_existing_tracks_ref_changes() {
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+        };
+        let existing = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo: repo.clone(),
+                version: Some("1.0.0".to_string()),
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        let incoming_same = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo: repo.clone(),
+                version: Some("1.0.0".to_string()),
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        let incoming_new = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo,
+                version: Some("2.0.0".to_string()),
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        assert!(!should_update_existing(&existing, &incoming_same));
+        assert!(should_update_existing(&existing, &incoming_new));
+    }
+
+    #[test]
+    fn skips_fisher_repo_but_keeps_other_entries() {
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let vars = env_vars(&env);
+        let _guard = EnvGuard::set(&vars);
+
+        env.setup_config(config::Config { plugins: None });
+        let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
+        fs::write(
+            &fish_plugins_path,
+            "jorgebucaran/fisher\njorgebucaran/other\n",
+        )
+        .unwrap();
+
+        let args = MigrateArgs {
+            dry_run: false,
+            force: false,
+            install: false,
+        };
+        run_migrate(&args).unwrap();
+
+        let cfg = config::load(&env.config_path).unwrap();
+        let plugins = cfg.plugins.expect("plugins written");
+        assert!(plugins.iter().any(|spec| {
+            spec.get_plugin_repo()
+                .map(|repo| repo.as_str() == "jorgebucaran/other")
+                .unwrap_or(false)
+        }));
+        assert!(!plugins.iter().any(|spec| {
+            spec.get_plugin_repo()
+                .map(|repo| repo.as_str() == "jorgebucaran/fisher")
+                .unwrap_or(false)
+        }));
+    }
+
+    #[test]
+    fn ignores_blank_and_comment_lines_without_warning() {
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let vars = env_vars(&env);
+        let _guard = EnvGuard::set(&vars);
+
+        env.setup_config(config::init());
+
+        let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
+        fs::write(&fish_plugins_path, "# comment\n\nowner/repo\n").unwrap();
+
+        let args = MigrateArgs {
+            dry_run: false,
+            force: false,
+            install: false,
+        };
+        let (logs, result) = crate::tests_support::log::capture_logs(|| run_migrate(&args));
+        assert!(result.is_ok());
+        assert!(
+            !logs
+                .iter()
+                .any(|line| line.contains("Skipping unrecognized entry"))
+        );
+    }
+
+    #[test]
+    fn dry_run_force_does_not_overwrite_config() {
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let vars = env_vars(&env);
+        let _guard = EnvGuard::set(&vars);
+
+        let existing_spec = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo: PluginRepo {
+                    host: None,
+                    owner: "owner".to_string(),
+                    repo: "keep".to_string(),
+                },
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        env.setup_config(config::Config {
+            plugins: Some(vec![existing_spec]),
+        });
+
+        let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
+        fs::write(&fish_plugins_path, "owner/new@1.0.0\n").unwrap();
+
+        let args = MigrateArgs {
+            dry_run: true,
+            force: true,
+            install: false,
+        };
+        run_migrate(&args).unwrap();
+
+        let cfg = config::load(&env.config_path).unwrap();
+        let plugins = cfg.plugins.expect("plugins written");
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].get_plugin_repo().unwrap().as_str(), "owner/keep");
+    }
+
+    #[test]
+    fn dry_run_does_not_add_new_entries() {
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let vars = env_vars(&env);
+        let _guard = EnvGuard::set(&vars);
+
+        let existing_spec = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo: PluginRepo {
+                    host: None,
+                    owner: "owner".to_string(),
+                    repo: "keep".to_string(),
+                },
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        env.setup_config(config::Config {
+            plugins: Some(vec![existing_spec]),
+        });
+
+        let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
+        fs::write(&fish_plugins_path, "owner/new\n").unwrap();
+
+        let args = MigrateArgs {
+            dry_run: true,
+            force: false,
+            install: false,
+        };
+        run_migrate(&args).unwrap();
+
+        let cfg = config::load(&env.config_path).unwrap();
+        let plugins = cfg.plugins.expect("plugins written");
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].get_plugin_repo().unwrap().as_str(), "owner/keep");
+    }
+
+    #[test]
+    fn dry_run_with_install_does_not_install() {
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let vars = env_vars(&env);
+        let _guard = EnvGuard::set(&vars);
+
+        env.setup_config(config::init());
+
+        let source_dir = env._temp_dir.path().join("local-migrate");
+        let conf_dir = source_dir.join(TargetDir::ConfD.as_str());
+        fs::create_dir_all(&conf_dir).unwrap();
+        fs::write(conf_dir.join("local-migrate.fish"), "echo local\n").unwrap();
+
+        let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
+        fs::write(&fish_plugins_path, source_dir.to_string_lossy().to_string()).unwrap();
+
+        assert!(!env.lock_file_path.exists());
+
+        let args = MigrateArgs {
+            dry_run: true,
+            force: false,
+            install: true,
+        };
+        run_migrate(&args).unwrap();
+
+        assert!(!env.lock_file_path.exists());
+        let installed_file = env
+            .fish_config_dir
+            .join(TargetDir::ConfD.as_str())
+            .join("local-migrate.fish");
+        assert!(!installed_file.exists());
+    }
+
+    #[test]
+    fn install_skipped_when_no_planned_changes() {
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let vars = env_vars(&env);
+        let _guard = EnvGuard::set(&vars);
+
+        let existing_spec = PluginSpec {
+            name: None,
+            source: PluginSource::Repo {
+                repo: PluginRepo {
+                    host: None,
+                    owner: "owner".to_string(),
+                    repo: "repo".to_string(),
+                },
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        env.setup_config(config::Config {
+            plugins: Some(vec![existing_spec]),
+        });
+
+        let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
+        fs::write(&fish_plugins_path, "owner/repo\n").unwrap();
+
+        assert!(!env.lock_file_path.exists());
+
+        let args = MigrateArgs {
+            dry_run: false,
+            force: false,
+            install: true,
+        };
+        run_migrate(&args).unwrap();
+
+        assert!(!env.lock_file_path.exists());
     }
 }
