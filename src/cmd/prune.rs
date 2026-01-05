@@ -217,7 +217,7 @@ where
         }
     }
 
-    let jobs = utils::load_jobs();
+    let jobs = utils::load_jobs().max(1);
     let fish_config_dir = ctx.fish_config_dir.to_path_buf();
     let data_dir = ctx.data_dir.to_path_buf();
 

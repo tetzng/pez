@@ -7,7 +7,7 @@ use tracing::{error, info, warn};
 
 pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
     info!("{}Starting uninstallation process...", Emoji("🔍 ", ""));
-    let jobs = utils::load_jobs();
+    let jobs = utils::load_jobs().max(1);
     let mut plugins: Vec<PluginRepo> = args.plugins.clone().unwrap_or_default();
     if plugins.is_empty() && args.stdin {
         let stdin_plugins = read_plugins_from_stdin()?;

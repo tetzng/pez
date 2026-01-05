@@ -14,7 +14,7 @@ use tracing::{error, info, warn};
 pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
     info!("{}Starting upgrade process...", Emoji("🔍 ", ""));
     if let Some(plugins) = &args.plugins {
-        let jobs = utils::load_jobs();
+        let jobs = utils::load_jobs().max(1);
         let tasks = stream::iter(plugins.iter())
             .map(|plugin| {
                 let plugin = plugin.clone();
@@ -66,7 +66,7 @@ async fn upgrade_all() -> anyhow::Result<()> {
             .iter()
             .filter_map(|p| p.get_plugin_repo().ok())
             .collect();
-        let jobs = utils::load_jobs();
+        let jobs = utils::load_jobs().max(1);
         let tasks = stream::iter(repos.into_iter())
             .map(|repo| {
                 tokio::task::spawn_blocking(move || {
