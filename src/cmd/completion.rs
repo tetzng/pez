@@ -41,7 +41,9 @@ mod tests {
     #[test]
     fn generate_fish_completion_returns_output() {
         let buffer = generate_fish_completion().unwrap();
-        assert!(!buffer.is_empty());
+        let output = String::from_utf8_lossy(&buffer);
+        assert!(output.contains("complete -c pez"));
+        assert!(output.contains("# Dynamic completions for installed plugins"));
     }
 
     #[test]

@@ -313,7 +313,12 @@ mod tests {
         with_env(&env, || {
             let args = cli::DoctorArgs { format: None };
             let (logs, result) = capture_logs(|| run(&args));
-            result.unwrap();
+            let checks = result.unwrap();
+            assert!(!checks.is_empty());
+            assert!(
+                logs.iter().any(|msg| msg.contains("pez doctor checks:")),
+                "missing header logs: {logs:?}"
+            );
             assert!(
                 !logs.iter().any(|msg| msg.contains("Errors detected")),
                 "unexpected warning logs: {logs:?}"

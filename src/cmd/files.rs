@@ -507,4 +507,11 @@ mod tests {
             Ok(())
         });
     }
+
+    #[test]
+    fn render_paths_returns_display_strings() {
+        let paths = vec![PathBuf::from("alpha/beta"), PathBuf::from("gamma")];
+        let expected: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+        assert_eq!(render_paths(&paths), expected);
+    }
 }
