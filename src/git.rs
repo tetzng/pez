@@ -1,6 +1,13 @@
 use crate::resolver::Selection;
 use git2::{Cred, Error, FetchOptions, RemoteCallbacks};
 use std::path;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(test)]
+static CALLBACKS_CONFIGURED: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static FETCH_OPTIONS_CONFIGURED: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn clone_repository(
     repo_url: &str,
@@ -21,6 +28,8 @@ fn setup_remote_callbacks() -> RemoteCallbacks<'static> {
     // Use libgit2's default credential negotiation which covers HTTPS, SSH agent,
     // and other common flows. This matches the behavior used in clone_repository.
     callbacks.credentials(|_, _, _| Cred::default());
+    #[cfg(test)]
+    CALLBACKS_CONFIGURED.fetch_add(1, Ordering::SeqCst);
     callbacks
 }
 
@@ -29,6 +38,8 @@ fn setup_fetch_options(callbacks: RemoteCallbacks<'static>) -> FetchOptions<'sta
     fetch_options.remote_callbacks(callbacks);
     // Download all tags to support @tag checkouts.
     fetch_options.download_tags(git2::AutotagOption::All);
+    #[cfg(test)]
+    FETCH_OPTIONS_CONFIGURED.fetch_add(1, Ordering::SeqCst);
     fetch_options
 }
 
@@ -353,6 +364,72 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> anyhow::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::Path;
+    use tempfile::tempdir;
+
+    fn init_repo_with_commit(path: &Path) -> (git2::Repository, git2::Oid) {
+        let repo = git2::Repository::init(path).unwrap();
+        let mut cfg = repo.config().unwrap();
+        cfg.set_str("user.name", "tester").unwrap();
+        cfg.set_str("user.email", "tester@example.com").unwrap();
+
+        fs::create_dir_all(path).unwrap();
+        fs::write(path.join("README.md"), "hello").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("README.md")).unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let commit_oid = {
+            let tree = repo.find_tree(tree_oid).unwrap();
+            let sig = repo.signature().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+                .unwrap()
+        };
+        (repo, commit_oid)
+    }
+
+    #[test]
+    fn setup_remote_callbacks_configures_credentials() {
+        CALLBACKS_CONFIGURED.store(0, Ordering::SeqCst);
+        let _ = setup_remote_callbacks();
+        assert!(CALLBACKS_CONFIGURED.load(Ordering::SeqCst) > 0);
+    }
+
+    #[test]
+    fn setup_fetch_options_configures_download_tags() {
+        FETCH_OPTIONS_CONFIGURED.store(0, Ordering::SeqCst);
+        let cb = setup_remote_callbacks();
+        let _ = setup_fetch_options(cb);
+        assert!(FETCH_OPTIONS_CONFIGURED.load(Ordering::SeqCst) > 0);
+    }
+
+    #[test]
+    fn get_latest_commit_sha_returns_head_commit() {
+        let tmp = tempdir().unwrap();
+        let (repo, commit_oid) = init_repo_with_commit(tmp.path());
+        let sha = get_latest_commit_sha(repo).unwrap();
+        assert_eq!(sha, commit_oid.to_string());
+    }
+
+    #[test]
+    fn checkout_ref_resolves_tag_commit() {
+        let tmp = tempdir().unwrap();
+        let (repo, commit_oid) = init_repo_with_commit(tmp.path());
+        let obj = repo.find_object(commit_oid, None).unwrap();
+        repo.tag_lightweight("v1.0.0", &obj, false).unwrap();
+
+        let checked = checkout_ref(&repo, "v1.0.0").unwrap();
+        assert_eq!(checked, commit_oid.to_string());
+    }
+
+    #[test]
+    fn is_local_source_recognizes_prefixes() {
+        assert!(is_local_source("/abs/path"));
+        assert!(is_local_source("./rel/path"));
+        assert!(is_local_source("../rel/path"));
+        assert!(is_local_source("~/rel/path"));
+        assert!(!is_local_source("https://github.com/o/r"));
+    }
 
     #[test]
     fn pick_tag_for_version_semver_prefix() {
@@ -380,6 +457,101 @@ mod tests {
         let sel = pick_tag_for_version(&tags, "1").unwrap().unwrap();
         // Should prefer highest among 1.x.y (either with or without v prefix)
         assert!(sel == "1.3.0" || sel == "v1.4.5");
+    }
+
+    #[test]
+    fn pick_tag_for_version_prefers_exact_semver_match() {
+        let tags = vec!["1.2.3".to_string(), "1.2.4".to_string()];
+        let sel = pick_tag_for_version(&tags, "1.2.3").unwrap().unwrap();
+        assert_eq!(sel, "1.2.3");
+    }
+
+    #[test]
+    fn pick_tag_for_version_respects_minor_prefix() {
+        let tags = vec![
+            "1.1.9".to_string(),
+            "1.2.3".to_string(),
+            "1.3.0".to_string(),
+        ];
+        let sel = pick_tag_for_version(&tags, "1.2").unwrap().unwrap();
+        assert_eq!(sel, "1.2.3");
+    }
+
+    #[test]
+    fn pick_tag_for_version_missing_non_semver_returns_none() {
+        let tags = vec!["alpha".to_string(), "beta".to_string()];
+        let sel = pick_tag_for_version(&tags, "release").unwrap();
+        assert!(sel.is_none());
+    }
+
+    #[test]
+    fn pick_tag_for_version_non_semver_dotted_suffix() {
+        let tags = vec!["1.2.0-beta".to_string(), "1.3.0-rc1".to_string()];
+        let sel = pick_tag_for_version(&tags, "1").unwrap().unwrap();
+        assert_eq!(sel, "1.3.0-rc1");
+    }
+
+    #[test]
+    fn get_remote_name_accepts_three_part_ref() {
+        let tmp = tempdir().unwrap();
+        let (repo, commit_oid) = init_repo_with_commit(tmp.path());
+        repo.reference("refs/remotes/origin", commit_oid, true, "create remote ref")
+            .unwrap();
+        let branch = repo
+            .find_branch("origin", git2::BranchType::Remote)
+            .unwrap();
+        let name = get_remote_name(&branch).unwrap();
+        assert_eq!(name, "origin");
+    }
+
+    #[test]
+    fn list_tags_fetches_remote_updates() {
+        let tmp = tempdir().unwrap();
+        let origin_path = tmp.path().join("origin.git");
+        let workdir_path = tmp.path().join("work");
+        let clone_path = tmp.path().join("clone");
+
+        let origin = git2::Repository::init_bare(&origin_path).unwrap();
+        let (work, _commit_oid) = init_repo_with_commit(&workdir_path);
+
+        work.remote("origin", origin_path.to_str().unwrap())
+            .unwrap();
+        let head_ref = work.head().unwrap().name().unwrap().to_string();
+        let refspec = format!("{head_ref}:{head_ref}");
+        {
+            let mut remote = work.find_remote("origin").unwrap();
+            remote
+                .connect(git2::Direction::Push)
+                .and_then(|_| remote.push(&[refspec.as_str()], None))
+                .unwrap();
+        }
+        origin.set_head(&head_ref).unwrap();
+
+        let clone = clone_repository(origin_path.to_str().unwrap(), &clone_path).unwrap();
+
+        // Create a new commit and tag it locally, then push only the tag.
+        fs::write(workdir_path.join("TAG.txt"), "tagged").unwrap();
+        let mut index = work.index().unwrap();
+        index.add_path(Path::new("TAG.txt")).unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = work.find_tree(tree_oid).unwrap();
+        let sig = work.signature().unwrap();
+        let parent = work.head().unwrap().peel_to_commit().unwrap();
+        let tag_commit = work
+            .commit(Some("HEAD"), &sig, &sig, "tag commit", &tree, &[&parent])
+            .unwrap();
+        let obj = work.find_object(tag_commit, None).unwrap();
+        work.tag_lightweight("orphan", &obj, false).unwrap();
+        {
+            let mut remote = work.find_remote("origin").unwrap();
+            remote
+                .connect(git2::Direction::Push)
+                .and_then(|_| remote.push(&["refs/tags/orphan:refs/tags/orphan"], None))
+                .unwrap();
+        }
+
+        let tags = list_tags(&clone).unwrap();
+        assert!(tags.iter().any(|tag| tag == "orphan"));
     }
 
     #[test]

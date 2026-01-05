@@ -363,6 +363,52 @@ impl InstallTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests_support::log::env_lock;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    struct EnvGuard {
+        vars: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn capture(keys: &[&'static str]) -> Self {
+            let vars = keys
+                .iter()
+                .map(|&key| (key, std::env::var_os(key)))
+                .collect();
+            Self { vars }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in &self.vars {
+                match value {
+                    Some(val) => unsafe { std::env::set_var(key, val.clone()) },
+                    None => unsafe { std::env::remove_var(key) },
+                }
+            }
+        }
+    }
+
+    struct CwdGuard {
+        original: PathBuf,
+    }
+
+    impl CwdGuard {
+        fn new() -> Self {
+            Self {
+                original: std::env::current_dir().unwrap(),
+            }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original);
+        }
+    }
 
     #[test]
     fn resolve_owner_repo_and_variants() {
@@ -423,6 +469,39 @@ mod tests {
         assert!(r.is_local);
         let cwd = std::env::current_dir().unwrap();
         assert!(r.source.starts_with(&*cwd.to_string_lossy()));
+    }
+
+    #[test]
+    fn resolve_tilde_path_expands_and_marks_local() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["HOME"]);
+        let temp = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let target = InstallTarget::from_raw("~/plugins");
+        let resolved = target.resolve().unwrap();
+        assert!(resolved.is_local);
+        let expected = temp.path().join("plugins").to_string_lossy().to_string();
+        assert_eq!(resolved.source, expected);
+        assert_eq!(resolved.plugin_repo.owner, "local");
+        assert_eq!(resolved.plugin_repo.repo, "plugins");
+    }
+
+    #[test]
+    fn resolve_absolute_path_does_not_require_current_dir() {
+        let _lock = env_lock().lock().unwrap();
+        let _cwd_guard = CwdGuard::new();
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+        drop(temp);
+
+        let abs_path = _cwd_guard.original.join("absolute-plugin");
+        let target = InstallTarget::from_raw(abs_path.to_string_lossy().to_string());
+        let resolved = target.resolve().expect("absolute path should resolve");
+        assert!(resolved.is_local);
+        assert_eq!(resolved.source, abs_path.to_string_lossy().to_string());
     }
 
     #[test]
