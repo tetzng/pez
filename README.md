@@ -24,9 +24,8 @@ state in a lockfile.
 
 ## Requirements
 
-- Fish shell
-- Git
-- Rust toolchain (for building from source)
+- [fish](https://fishshell.com/)
+- [Cargo](https://doc.rust-lang.org/stable/cargo/)
 
 ## Installation
 
@@ -170,7 +169,7 @@ pez is inspired by the following projects:
 
 ## License
 
-MIT. See `LICENSE`.
+[MIT](./LICENSE)
 
 ## Author
 
