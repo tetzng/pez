@@ -43,10 +43,26 @@ fn setup_fetch_options(callbacks: RemoteCallbacks<'static>) -> FetchOptions<'sta
     fetch_options
 }
 
-pub(crate) fn get_latest_commit_sha(repo: git2::Repository) -> Result<String, git2::Error> {
+pub(crate) fn get_latest_commit_sha(repo: &git2::Repository) -> Result<String, git2::Error> {
     let commit = repo.head()?.peel_to_commit()?;
 
     Ok(commit.id().to_string())
+}
+
+pub(crate) fn checkout_detached(repo: &git2::Repository, oid: git2::Oid) -> anyhow::Result<()> {
+    repo.set_head_detached(oid)?;
+    if repo.is_bare() {
+        return Ok(());
+    }
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force();
+    repo.checkout_head(Some(&mut checkout))?;
+    Ok(())
+}
+
+pub(crate) fn checkout_commit(repo: &git2::Repository, commit: &str) -> anyhow::Result<()> {
+    let oid = git2::Oid::from_str(commit)?;
+    checkout_detached(repo, oid)
 }
 
 /// Attempts to checkout the provided git `refspec` (tag/branch/commit) and returns the checked out commit sha.
@@ -56,7 +72,7 @@ pub(crate) fn checkout_ref(repo: &git2::Repository, refspec: &str) -> anyhow::Re
     let obj = repo
         .revparse_single(refspec)
         .or_else(|_| repo.revparse_single(&format!("refs/tags/{refspec}")))?;
-    repo.set_head_detached(obj.id())?;
+    checkout_detached(repo, obj.id())?;
     Ok(obj.id().to_string())
 }
 
@@ -407,7 +423,7 @@ mod tests {
     fn get_latest_commit_sha_returns_head_commit() {
         let tmp = tempdir().unwrap();
         let (repo, commit_oid) = init_repo_with_commit(tmp.path());
-        let sha = get_latest_commit_sha(repo).unwrap();
+        let sha = get_latest_commit_sha(&repo).unwrap();
         assert_eq!(sha, commit_oid.to_string());
     }
 

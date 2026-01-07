@@ -135,7 +135,7 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                     return Ok(());
                 }
 
-                repo.set_head_detached(git2::Oid::from_str(&latest_remote_commit)?)?;
+                git::checkout_commit(&repo, &latest_remote_commit)?;
 
                 lock_file_plugin.files.iter().for_each(|file| {
                     let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
