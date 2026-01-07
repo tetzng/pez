@@ -43,10 +43,26 @@ fn setup_fetch_options(callbacks: RemoteCallbacks<'static>) -> FetchOptions<'sta
     fetch_options
 }
 
-pub(crate) fn get_latest_commit_sha(repo: git2::Repository) -> Result<String, git2::Error> {
+pub(crate) fn get_latest_commit_sha(repo: &git2::Repository) -> Result<String, git2::Error> {
     let commit = repo.head()?.peel_to_commit()?;
 
     Ok(commit.id().to_string())
+}
+
+pub(crate) fn checkout_detached(repo: &git2::Repository, oid: git2::Oid) -> anyhow::Result<()> {
+    repo.set_head_detached(oid)?;
+    if repo.is_bare() {
+        return Ok(());
+    }
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force();
+    repo.checkout_head(Some(&mut checkout))?;
+    Ok(())
+}
+
+pub(crate) fn checkout_commit(repo: &git2::Repository, commit: &str) -> anyhow::Result<()> {
+    let oid = git2::Oid::from_str(commit)?;
+    checkout_detached(repo, oid)
 }
 
 /// Attempts to checkout the provided git `refspec` (tag/branch/commit) and returns the checked out commit sha.
@@ -56,7 +72,7 @@ pub(crate) fn checkout_ref(repo: &git2::Repository, refspec: &str) -> anyhow::Re
     let obj = repo
         .revparse_single(refspec)
         .or_else(|_| repo.revparse_single(&format!("refs/tags/{refspec}")))?;
-    repo.set_head_detached(obj.id())?;
+    checkout_detached(repo, obj.id())?;
     Ok(obj.id().to_string())
 }
 
@@ -388,6 +404,28 @@ mod tests {
         (repo, commit_oid)
     }
 
+    fn commit_file(repo: &git2::Repository, rel_path: &Path, message: &str) -> git2::Oid {
+        let mut index = repo.index().unwrap();
+        index.add_path(rel_path).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = git2::Signature::now("tester", "tester@example.com").unwrap();
+        let parent = repo
+            .head()
+            .ok()
+            .and_then(|head| head.target())
+            .and_then(|oid| repo.find_commit(oid).ok());
+        match parent {
+            Some(ref parent) => repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[parent])
+                .unwrap(),
+            None => repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[])
+                .unwrap(),
+        }
+    }
+
     #[test]
     fn setup_remote_callbacks_configures_credentials() {
         CALLBACKS_CONFIGURED.store(0, Ordering::SeqCst);
@@ -407,7 +445,7 @@ mod tests {
     fn get_latest_commit_sha_returns_head_commit() {
         let tmp = tempdir().unwrap();
         let (repo, commit_oid) = init_repo_with_commit(tmp.path());
-        let sha = get_latest_commit_sha(repo).unwrap();
+        let sha = get_latest_commit_sha(&repo).unwrap();
         assert_eq!(sha, commit_oid.to_string());
     }
 
@@ -420,6 +458,34 @@ mod tests {
 
         let checked = checkout_ref(&repo, "v1.0.0").unwrap();
         assert_eq!(checked, commit_oid.to_string());
+    }
+
+    #[test]
+    fn checkout_commit_updates_worktree() {
+        let tmp = tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        let mut cfg = repo.config().unwrap();
+        cfg.set_str("user.name", "tester").unwrap();
+        cfg.set_str("user.email", "tester@example.com").unwrap();
+
+        let file_path = tmp.path().join("README.md");
+        std::fs::write(&file_path, "one").unwrap();
+        let first = commit_file(&repo, Path::new("README.md"), "first");
+
+        std::fs::write(&file_path, "two").unwrap();
+        let second = commit_file(&repo, Path::new("README.md"), "second");
+
+        let head_oid = repo.head().unwrap().target().unwrap();
+        assert_eq!(head_oid, second);
+
+        checkout_commit(&repo, &first.to_string()).unwrap();
+
+        let contents = std::fs::read_to_string(&file_path).unwrap();
+        assert_eq!(contents, "one");
+
+        let head = repo.head().unwrap();
+        assert_eq!(head.target().unwrap(), first);
+        assert!(repo.head_detached().unwrap());
     }
 
     #[test]

@@ -201,17 +201,12 @@ async fn clone_plugins(
                                 Emoji("🔄 ", ""),
                                 &lock_file_plugin.commit_sha
                             );
-                            if let Ok(oid) = git2::Oid::from_str(&lock_file_plugin.commit_sha) {
-                                if let Err(e) = repo.set_head_detached(oid) {
-                                    warn!(
-                                        "Failed to detach HEAD to {}: {:?}",
-                                        lock_file_plugin.commit_sha, e
-                                    );
-                                }
-                            } else {
+                            if let Err(e) =
+                                git::checkout_commit(&repo, &lock_file_plugin.commit_sha)
+                            {
                                 warn!(
-                                    "Invalid commit SHA in lock file: {}",
-                                    lock_file_plugin.commit_sha
+                                    "Failed to detach HEAD to {}: {:?}",
+                                    lock_file_plugin.commit_sha, e
                                 );
                             }
                             Plugin {
@@ -231,7 +226,7 @@ async fn clone_plugins(
                                         "Failed to resolve selection: {:?}. Falling back to HEAD.",
                                         e
                                     );
-                                    match git::get_latest_commit_sha(repo) {
+                                    match git::get_latest_commit_sha(&repo) {
                                         Ok(s) => s,
                                         Err(e) => {
                                             warn!("Failed to read HEAD commit: {:?}", e);
@@ -240,6 +235,9 @@ async fn clone_plugins(
                                     }
                                 }
                             };
+                            if let Err(e) = git::checkout_commit(&repo, &commit_sha) {
+                                warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
+                            }
                             Plugin {
                                 name: name.to_string(),
                                 repo: plugin_repo.clone(),
@@ -258,7 +256,7 @@ async fn clone_plugins(
                                     "Failed to resolve selection: {:?}. Falling back to HEAD.",
                                     e
                                 );
-                                match git::get_latest_commit_sha(repo) {
+                                match git::get_latest_commit_sha(&repo) {
                                     Ok(s) => s,
                                     Err(e) => {
                                         warn!("Failed to read HEAD commit: {:?}", e);
@@ -267,6 +265,9 @@ async fn clone_plugins(
                                 }
                             }
                         };
+                        if let Err(e) = git::checkout_commit(&repo, &commit_sha) {
+                            warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
+                        }
                         Plugin {
                             name: name.to_string(),
                             repo: plugin_repo.clone(),
@@ -431,12 +432,16 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                             Emoji("🔄 ", ""),
                             &locked_plugin.commit_sha
                         );
-                        if let Ok(oid) = git2::Oid::from_str(&locked_plugin.commit_sha) {
-                            let _ = repo.set_head_detached(oid);
-                        }
+                        let _ = git::checkout_commit(repo, &locked_plugin.commit_sha);
                     }
                     locked_plugin.commit_sha.clone()
                 };
+                if *force
+                    && let Some(repo) = &repo
+                    && let Err(e) = git::checkout_commit(repo, &commit_sha)
+                {
+                    warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
+                }
                 debug!(repo = %repo_for_id, source = %source_base, commit = %commit_sha, "Install resolved commit");
                 let mut plugin = Plugin {
                     name: plugin_spec.get_name()?,
@@ -501,16 +506,20 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     ensure_repo_parent(&repo_path)?;
                     let repo = git::clone_repository(&source_base, &repo_path)?;
                     let sel = resolver::selection_from_ref_kind(&ref_kind);
-                    match git::resolve_selection(&repo, &sel) {
+                    let commit_sha = match git::resolve_selection(&repo, &sel) {
                         std::result::Result::Ok(sha) => sha,
                         Err(e) => {
                             warn!(
                                 "Failed to resolve selection: {:?}. Falling back to HEAD.",
                                 e
                             );
-                            git::get_latest_commit_sha(repo)?
+                            git::get_latest_commit_sha(&repo)?
                         }
+                    };
+                    if let Err(e) = git::checkout_commit(&repo, &commit_sha) {
+                        warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
                     }
+                    commit_sha
                 };
                 let mut plugin = Plugin {
                     name: plugin_spec.get_name()?,
