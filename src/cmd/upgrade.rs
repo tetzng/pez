@@ -233,8 +233,18 @@ mod tests {
 
     fn commit_paths(repo: &git2::Repository, paths: &[&str], message: &str) -> String {
         let mut index = repo.index().unwrap();
+        let workdir = repo.workdir().map(|p| p.to_path_buf());
         for path in paths {
-            index.add_path(Path::new(path)).unwrap();
+            let rel = Path::new(path);
+            let exists = workdir
+                .as_ref()
+                .map(|wd| wd.join(rel).exists())
+                .unwrap_or(true);
+            if exists {
+                index.add_path(rel).unwrap();
+            } else {
+                let _ = index.remove_path(rel);
+            }
         }
         index.write().unwrap();
         let tree_id = index.write_tree().unwrap();
@@ -332,7 +342,17 @@ mod tests {
             "echo two\n",
         )
         .unwrap();
-        let second = commit_paths(&work, &["conf.d/alpha.fish"], "second commit");
+        std::fs::remove_file(
+            workdir_path
+                .join(TargetDir::Functions.as_str())
+                .join("beta.fish"),
+        )
+        .unwrap();
+        let second = commit_paths(
+            &work,
+            &["conf.d/alpha.fish", "functions/beta.fish"],
+            "second commit",
+        );
         push_origin(&work);
         origin.set_head("refs/heads/main").unwrap();
 
@@ -557,6 +577,48 @@ mod tests {
         let lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
         let updated = lock.get_plugin_by_repo(&fixture.repo).unwrap();
         assert_eq!(updated.commit_sha, fixture.first_commit);
+    }
+
+    #[test]
+    fn upgrade_plugin_updates_repo_checkout_and_files() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        crate::utils::clear_cli_jobs_override_for_tests();
+        let fixture = UpgradeFixture::new(false);
+        let _override = EnvOverride::new(&[
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+        ]);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+            std::env::set_var("__fish_config_dir", &fixture.env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &fixture.env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &fixture.env.data_dir);
+        }
+
+        fixture.env.setup_fish_config();
+
+        let repo_path = fixture.env.data_dir.join(fixture.repo.as_str());
+        let repo = git2::Repository::open(&repo_path).unwrap();
+        crate::git::checkout_commit(&repo, &fixture.first_commit).unwrap();
+
+        upgrade_plugin(&fixture.repo).expect("upgrade should succeed");
+
+        let alpha_path = fixture
+            .env
+            .fish_config_dir
+            .join(TargetDir::ConfD.as_str())
+            .join("alpha.fish");
+        let alpha_contents = std::fs::read_to_string(alpha_path).unwrap();
+        assert_eq!(alpha_contents, "echo two\n");
+
+        let beta_path = fixture
+            .env
+            .fish_config_dir
+            .join(TargetDir::Functions.as_str())
+            .join("beta.fish");
+        assert!(!beta_path.exists());
     }
 
     #[allow(clippy::await_holding_lock)]
