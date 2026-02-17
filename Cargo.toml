@@ -21,7 +21,7 @@ tabled = "0.20.0"
 toml = "0.9.11"
 clap_complete = "4.5.66"
 regex = "1.12.3"
-futures = "0.3.31"
+futures = "0.3.32"
 tokio = { version = "1.49.0", features = ["macros", "rt", "rt-multi-thread", "sync"] }
 anyhow = "1.0.101"
 tempfile = "3.25.0"
