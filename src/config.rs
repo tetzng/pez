@@ -1,14 +1,18 @@
+use anyhow::Context;
 use serde_derive::{Deserialize, Serialize};
 use std::{fs, path};
 
 use crate::models::{PluginRepo, ResolvedInstallTarget};
 use crate::resolver::{ref_kind_to_repo_source, ref_kind_to_url_source};
 
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     pub(crate) plugins: Option<Vec<PluginSpec>>,
 }
 
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct PluginSpec {
     pub(crate) name: Option<String>,
@@ -16,11 +20,13 @@ pub(crate) struct PluginSpec {
     pub(crate) source: PluginSource,
 }
 
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub(crate) enum PluginSource {
     // GitHub shorthand: { repo = "owner/repo", [version|branch|tag|commit] = "..." }
     Repo {
+        #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
         repo: crate::models::PluginRepo,
         #[serde(default)]
         version: Option<String>,
@@ -55,8 +61,12 @@ pub(crate) fn init() -> Config {
 
 pub(crate) fn load(path: &path::PathBuf) -> anyhow::Result<Config> {
     let content = fs::read_to_string(path)?;
-    let config = toml::from_str(&content)?;
+    parse_config(&content).with_context(|| format!("Invalid config file: {}", path.display()))
+}
 
+fn parse_config(content: &str) -> anyhow::Result<Config> {
+    let config: Config = toml::from_str(content)?;
+    config.validate()?;
     Ok(config)
 }
 
@@ -65,6 +75,17 @@ impl Config {
         let contents = toml::to_string(self)?;
         fs::write(path, contents)?;
 
+        Ok(())
+    }
+
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        if let Some(plugins) = &self.plugins {
+            for (idx, plugin) in plugins.iter().enumerate() {
+                plugin
+                    .validate()
+                    .with_context(|| format!("invalid plugins[{idx}]"))?;
+            }
+        }
         Ok(())
     }
 
@@ -97,6 +118,36 @@ impl Config {
 }
 
 impl PluginSpec {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        match &self.source {
+            PluginSource::Repo {
+                version,
+                branch,
+                tag,
+                commit,
+                ..
+            }
+            | PluginSource::Url {
+                version,
+                branch,
+                tag,
+                commit,
+                ..
+            } => {
+                let _ = pick_single_ref(version, branch, tag, commit)?;
+            }
+            PluginSource::Path { path } => {
+                let expanded = expand_tilde(path)?;
+                if !expanded.starts_with('/') {
+                    anyhow::bail!(
+                        "path must be absolute or start with ~/ (after expansion must be absolute)"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn get_name(&self) -> anyhow::Result<String> {
         if let Some(name) = &self.name {
             return Ok(name.clone());
@@ -670,5 +721,48 @@ mod tests {
 
         let unchanged = expand_tilde("/absolute/path").unwrap();
         assert_eq!(unchanged, "/absolute/path");
+    }
+
+    #[test]
+    fn parse_config_rejects_unknown_top_level_field() {
+        let content = r#"
+plugins = []
+unexpected = "value"
+"#;
+        let err = parse_config(content).unwrap_err();
+        assert!(err.to_string().contains("unknown field `unexpected`"));
+    }
+
+    #[test]
+    fn parse_config_rejects_selector_for_path_source() {
+        let content = r#"
+[[plugins]]
+path = "~/my-plugin"
+branch = "main"
+"#;
+        let err = parse_config(content).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown field `branch`") || msg.contains("did not match any variant"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn config_validate_rejects_relative_path() {
+        let config = Config {
+            plugins: Some(vec![PluginSpec {
+                name: None,
+                source: PluginSource::Path {
+                    path: "relative/plugin".to_string(),
+                },
+            }]),
+        };
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("invalid plugins[0]") || msg.contains("path must be absolute"),
+            "{msg}"
+        );
     }
 }

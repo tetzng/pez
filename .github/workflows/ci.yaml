@@ -43,3 +43,13 @@ jobs:
         run: cargo clippy --workspace --all-targets
       - name: clippy "All Features"
         run: cargo clippy --workspace --all-features --all-targets
+  schema_check:
+    name: config schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: regenerate schema
+        run: cargo run --features schema-gen --bin gen-config-schema
+      - name: check schema up to date
+        run: git diff --exit-code -- config.schema.json

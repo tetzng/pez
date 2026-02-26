@@ -1,2 +1,4 @@
 /target
 repomix-output.xml
+mutants.out/
+mutants.out.old/
