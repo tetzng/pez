@@ -134,6 +134,12 @@ default. Configuration file precedence is:
 `PEZ_TARGET_DIR` only affects where plugin files are copied. For schema,
 location details, and environment variables, see [docs/configuration.md](docs/configuration.md).
 
+To regenerate the config schema:
+
+```sh
+cargo run --features schema-gen --bin gen-config-schema
+```
+
 For install/upgrade behavior (selectors, duplicates, concurrency, existing
 clones), see [docs/commands.md](docs/commands.md).
 

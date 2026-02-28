@@ -65,6 +65,22 @@ Notes
 - CLI‑provided relative paths and `~/` are normalized to absolute paths when recorded.
 - `path` must resolve to an absolute path (either absolute or `~/…`).
 - Host-prefixed repos (e.g., `gitlab.com/owner/repo`) are recorded as-is and cloned under `<host>/<owner>/<repo>` inside the data directory. GitHub shorthand (`owner/repo`) continues to map to `github.com`.
+- Unknown keys in `pez.toml` are rejected at load time.
+- `path` sources cannot include version selectors (`version`/`branch`/`tag`/`commit`).
+
+## JSON Schema
+
+`config.schema.json` provides a JSON Schema representation of the `pez.toml`
+plugin spec rules.
+
+Regenerate it with:
+
+```sh
+cargo run --features schema-gen --bin gen-config-schema
+```
+
+When changing config-related types or validation rules, regenerate
+`config.schema.json` and include the updated file in the same commit.
 
 ## pez-lock.toml
 

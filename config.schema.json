@@ -1,0 +1,254 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "PluginSpec": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "branch": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "commit": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "repo": {
+              "type": "string"
+            },
+            "tag": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "version": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "repo"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "branch": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "commit": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tag": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "url": {
+              "type": "string"
+            },
+            "version": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "properties": {
+    "plugins": {
+      "items": {
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "repo"
+                ]
+              },
+              {
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "required": [
+                  "path"
+                ]
+              }
+            ]
+          },
+          {
+            "oneOf": [
+              {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "version"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "branch"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "tag"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "commit"
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "version"
+                ]
+              },
+              {
+                "required": [
+                  "branch"
+                ]
+              },
+              {
+                "required": [
+                  "tag"
+                ]
+              },
+              {
+                "required": [
+                  "commit"
+                ]
+              }
+            ]
+          },
+          {
+            "if": {
+              "required": [
+                "path"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "version"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "branch"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "tag"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "commit"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "pattern": "^(?:/|~(?:/|$))",
+            "type": "string"
+          },
+          "repo": {
+            "pattern": "^(?:[A-Za-z0-9.-]+/)?[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "title": "pez config",
+  "type": "object"
+}
