@@ -547,6 +547,18 @@ mod tests {
     }
 
     #[test]
+    fn has_activate_fish_line_requires_activation_command() {
+        let contents = "set -gx PEZ_TEST 1\nfunctions -q pez\n";
+        assert!(!has_activate_fish_line(contents));
+    }
+
+    #[test]
+    fn has_activate_fish_line_ignores_commented_activation_line() {
+        let contents = "# pez activate fish | source\n# another comment\n";
+        assert!(!has_activate_fish_line(contents));
+    }
+
+    #[test]
     fn render_plain_lines_prefixes_statuses() {
         let checks = vec![
             DoctorCheck {
