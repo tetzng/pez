@@ -38,6 +38,8 @@ pez list --format table
 pez completions fish > ~/.config/fish/completions/pez.fish
 ```
 
+Completions are intentionally Fish-only.
+
 5) Optional: enable fish shell hooks (conf.d events) for the current shell
 
 ```shell

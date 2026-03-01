@@ -96,12 +96,13 @@ Global options (apply to all commands)
 ### doctor
 
 - Checks the configuration file, lockfile, data/config directories, and the set of copied files.
-- Reported checks include: `config`, `lock_file`, `fish_config_dir`, `pez_data_dir`, `repos` (missing clones), `target_files` (missing files), `duplicates` (conflicting destinations).
+- Reported checks include: `config`, `lock_file`, `fish_config_dir`, `pez_data_dir`, `activate_configured`, `event_hook_readiness`, `install_layout`, `repos` (missing clones), `target_files` (missing files), `duplicates` (conflicting destinations), `theme_assets`.
 - Options: `--format json`.
 
 ### completions
 
 - Generate completion script for Fish: `pez completions fish > ~/.config/fish/completions/pez.fish`
+- Completions are intentionally Fish-only.
 
 ### activate
 
@@ -133,3 +134,5 @@ Global options (apply to all commands)
 - `--dry-run` prints the planned additions without modifying any files.
 - `--force` replaces the existing plugin list with the migrated entries instead of merging.
 - `--install` triggers `pez install` for the migrated entries after they are written (skipped when `--dry-run` is set).
+- The command always prints "Next steps" guidance (install/verify/doctor/activate flow) so you can continue migration safely.
+- Recommended migration flow is documented in [migrate-from-fisher.md](migrate-from-fisher.md).

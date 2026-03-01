@@ -140,6 +140,58 @@ fn describe_spec(spec: &PluginSpec) -> String {
     }
 }
 
+fn suggested_migrate_command(args: &MigrateArgs) -> String {
+    let mut command = String::from("pez migrate");
+    if args.force {
+        command.push_str(" --force");
+    }
+    if args.install {
+        command.push_str(" --install");
+    }
+    command
+}
+
+fn print_next_steps(args: &MigrateArgs, planned_count: usize, install_executed: bool) {
+    info!("{}Next steps:", Emoji("➡️  ", ""));
+
+    if args.dry_run {
+        let command = suggested_migrate_command(args);
+        info!("  1) Apply migration: {command}");
+        if !args.install {
+            info!("  2) Install migrated plugins: pez install");
+            info!("  3) Verify installed plugins: pez list --format table");
+            info!("  4) Run diagnostics: pez doctor");
+            info!("  5) Enable shell hooks if needed: pez activate fish | source");
+        } else {
+            info!("  2) Verify installed plugins: pez list --format table");
+            info!("  3) Run diagnostics: pez doctor");
+            info!("  4) Enable shell hooks if needed: pez activate fish | source");
+        }
+        return;
+    }
+
+    if install_executed {
+        info!("  1) Verify installed plugins: pez list --format table");
+        info!("  2) Run diagnostics: pez doctor");
+        info!("  3) Enable shell hooks if needed: pez activate fish | source");
+        return;
+    }
+
+    if planned_count == 0 {
+        info!(
+            "  1) No config changes were applied. Update fish_plugins and rerun pez migrate if needed."
+        );
+        info!("  2) Verify current plugins: pez list --format table");
+        info!("  3) Run diagnostics: pez doctor");
+        return;
+    }
+
+    info!("  1) Install migrated plugins: pez install");
+    info!("  2) Verify installed plugins: pez list --format table");
+    info!("  3) Run diagnostics: pez doctor");
+    info!("  4) Enable shell hooks if needed: pez activate fish | source");
+}
+
 pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
     let fish_config_dir = utils::load_fish_config_dir()?;
     let fisher_plugins_path = fish_config_dir.join("fish_plugins");
@@ -221,12 +273,14 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
 
     if entries.is_empty() {
         warn!("{}No valid entries to migrate.", Emoji("⚠ ", ""));
+        print_next_steps(args, 0, false);
         return Ok(());
     }
 
     let entries = dedup_entries(entries);
     if entries.is_empty() {
         warn!("{}No valid entries to migrate.", Emoji("⚠ ", ""));
+        print_next_steps(args, 0, false);
         return Ok(());
     }
 
@@ -286,6 +340,7 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
         info!("{}Nothing to update.", Emoji("ℹ ", ""));
     }
 
+    let mut install_executed = false;
     if !args.dry_run && args.install && !planned.is_empty() {
         let targets: Vec<_> = planned
             .iter()
@@ -298,7 +353,10 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
         };
         info!("{}Installing migrated plugins...", Emoji("🚀 ", ""));
         crate::cmd::install::run(&install_args).await?;
+        install_executed = true;
     }
+
+    print_next_steps(args, planned.len(), install_executed);
     Ok(())
 }
 
@@ -1203,6 +1261,71 @@ mod tests {
     }
 
     #[test]
+    fn dry_run_logs_next_steps() {
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let vars = env_vars(&env);
+        let _guard = EnvGuard::set(&vars);
+
+        env.setup_config(config::init());
+        let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
+        fs::write(&fish_plugins_path, "owner/repo\n").unwrap();
+
+        let args = MigrateArgs {
+            dry_run: true,
+            force: false,
+            install: false,
+        };
+        let (logs, result) = crate::tests_support::log::capture_logs(|| run_migrate(&args));
+        assert!(result.is_ok());
+        assert!(logs.iter().any(|line| line.contains("Next steps:")));
+        assert!(
+            logs.iter()
+                .any(|line| line.contains("Apply migration: pez migrate"))
+        );
+        assert!(
+            logs.iter()
+                .any(|line| line.contains("Install migrated plugins: pez install"))
+        );
+    }
+
+    #[test]
+    fn install_mode_logs_next_steps_after_install() {
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let vars = env_vars(&env);
+        let _guard = EnvGuard::set(&vars);
+
+        env.setup_config(config::init());
+
+        let source_dir = env._temp_dir.path().join("local-migrate-install");
+        let conf_dir = source_dir.join(TargetDir::ConfD.as_str());
+        fs::create_dir_all(&conf_dir).unwrap();
+        fs::write(conf_dir.join("local-migrate-install.fish"), "echo local\n").unwrap();
+
+        let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
+        fs::write(&fish_plugins_path, source_dir.to_string_lossy().to_string()).unwrap();
+
+        let args = MigrateArgs {
+            dry_run: false,
+            force: false,
+            install: true,
+        };
+        let (logs, result) = crate::tests_support::log::capture_logs(|| run_migrate(&args));
+        assert!(result.is_ok());
+        assert!(
+            logs.iter()
+                .any(|line| line.contains("Installing migrated plugins"))
+        );
+        assert!(logs.iter().any(|line| line.contains("Next steps:")));
+        assert!(
+            !logs
+                .iter()
+                .any(|line| line.contains("Install migrated plugins: pez install"))
+        );
+    }
+
+    #[test]
     fn install_skipped_when_no_planned_changes() {
         let mut env = TestEnvironmentSetup::new();
         let _lock = crate::tests_support::log::env_lock().lock().unwrap();
@@ -1240,5 +1363,34 @@ mod tests {
         run_migrate(&args).unwrap();
 
         assert!(!env.lock_file_path.exists());
+    }
+
+    #[test]
+    fn no_valid_entries_still_logs_next_steps() {
+        let mut env = TestEnvironmentSetup::new();
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let vars = env_vars(&env);
+        let _guard = EnvGuard::set(&vars);
+
+        env.setup_config(config::init());
+        let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
+        fs::write(&fish_plugins_path, "jorgebucaran/fisher\n").unwrap();
+
+        let args = MigrateArgs {
+            dry_run: false,
+            force: false,
+            install: false,
+        };
+        let (logs, result) = crate::tests_support::log::capture_logs(|| run_migrate(&args));
+        assert!(result.is_ok());
+        assert!(
+            logs.iter()
+                .any(|line| line.contains("No valid entries to migrate"))
+        );
+        assert!(logs.iter().any(|line| line.contains("Next steps:")));
+        assert!(
+            logs.iter()
+                .any(|line| line.contains("No config changes were applied"))
+        );
     }
 }

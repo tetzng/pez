@@ -22,14 +22,9 @@ state in a lockfile.
 - `upgrade`, `prune`, and `doctor` utilities
 - Optional activation wrapper to emit conf.d events in the current shell
 
-## Requirements
-
-- [fish](https://fishshell.com/)
-- [Cargo](https://doc.rust-lang.org/stable/cargo/)
-
 ## Installation
 
-Ensure you have Rust installed on your system. You can install pez using Cargo:
+Install with Cargo:
 
 ```sh
 # From crates.io (if available)
@@ -38,6 +33,8 @@ cargo install pez
 # From source (in this repo)
 cargo install --path .
 ```
+
+Or use a prebuilt release binary (when available), which does not require Cargo.
 
 ## Quickstart
 
@@ -77,6 +74,8 @@ pez activate fish | source
 pez completions fish > ~/.config/fish/completions/pez.fish
 ```
 
+Completions are intentionally Fish-only.
+
 ## Shell Activation
 
 ```fish
@@ -95,7 +94,20 @@ For persistence, add it inside an `if status is-interactive ... end` block in `~
 - [Configuration](docs/configuration.md)
 - [Architecture](docs/architecture.md)
 - [Install & build](docs/install.md)
+- [Migrate from fisher](docs/migrate-from-fisher.md)
 - [FAQ](docs/faq.md)
+
+## Migrate from fisher
+
+```fish
+pez activate fish | source
+pez migrate
+pez install
+pez list --format table
+pez doctor
+```
+
+Details: [docs/migrate-from-fisher.md](docs/migrate-from-fisher.md)
 
 ## Usage (overview)
 

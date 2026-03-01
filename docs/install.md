@@ -2,9 +2,9 @@
 
 ### System requirements
 
-- Fish shell (for using the installed plugins)
-- Git (for cloning plugin repositories)
-- Rust toolchain (stable) with Cargo
+- No mandatory external tools are required when using a prebuilt `pez` binary.
+- Cargo is required only for `cargo install` or local source builds.
+- Fish is required only for actually using installed Fish plugins.
 
 ### Install
 
@@ -47,6 +47,8 @@ cargo build --release
 ```shell
 pez completions fish > ~/.config/fish/completions/pez.fish
 ```
+
+Completions are intentionally Fish-only.
 
 ### Shell activation
 
