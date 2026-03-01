@@ -21,7 +21,7 @@ fn home_dir() -> anyhow::Result<path::PathBuf> {
     Err(anyhow::anyhow!("Could not determine home directory"))
 }
 
-fn load_default_fish_config_dir() -> anyhow::Result<path::PathBuf> {
+pub(crate) fn load_default_fish_config_dir() -> anyhow::Result<path::PathBuf> {
     if let Some(dir) = env::var_os("__fish_config_dir") {
         return Ok(path::PathBuf::from(dir));
     }
