@@ -696,6 +696,26 @@ mod tests {
         commit_id.to_string()
     }
 
+    fn init_remote_repo_with_conf_file(path: &Path, conf_file_name: &str) -> String {
+        std::fs::create_dir_all(path).unwrap();
+        let repo = git2::Repository::init(path).unwrap();
+        let conf_dir = path.join(TargetDir::ConfD.as_str());
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        std::fs::write(conf_dir.join(conf_file_name), "echo host test\n").unwrap();
+
+        let rel_path = Path::new("conf.d").join(conf_file_name);
+        let mut index = repo.index().unwrap();
+        index.add_path(&rel_path).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = git2::Signature::now("pez", "pez@example.com").unwrap();
+        let commit_id = repo
+            .commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+            .unwrap();
+        commit_id.to_string()
+    }
+
     fn commit_file(repo: &git2::Repository, rel_path: &Path, message: &str) -> String {
         let mut index = repo.index().unwrap();
         index.add_path(rel_path).unwrap();
@@ -946,6 +966,99 @@ mod tests {
             .join(TargetDir::ConfD.as_str())
             .join("local-plugin.fish");
         assert!(fish_file.exists());
+    }
+
+    #[test]
+    fn run_installs_multi_host_same_owner_repo_with_distinct_paths_and_lock_rows() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let remote_root = test_env._temp_dir.path().join("remotes");
+        let github_repo_path = remote_root.join("github.com").join("owner").join("repo");
+        let gitlab_repo_path = remote_root.join("gitlab.com").join("owner").join("repo");
+        init_remote_repo_with_conf_file(&github_repo_path, "github-repo.fish");
+        init_remote_repo_with_conf_file(&gitlab_repo_path, "gitlab-repo.fish");
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let mut github_target = InstallTarget::from_raw("github.com/owner/repo")
+            .resolve()
+            .unwrap();
+        let mut gitlab_target = InstallTarget::from_raw("gitlab.com/owner/repo")
+            .resolve()
+            .unwrap();
+        github_target.source = format!("file://{}", github_repo_path.display());
+        gitlab_target.source = format!("file://{}", gitlab_repo_path.display());
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let mut cloned_plugins = rt
+            .block_on(clone_plugins(
+                &[github_target, gitlab_target],
+                false,
+                LockFile {
+                    version: 1,
+                    plugins: vec![],
+                },
+                &test_env.data_dir,
+            ))
+            .unwrap();
+        let installed_plugins = rt
+            .block_on(sync_plugin_files(&mut cloned_plugins, &test_env.data_dir))
+            .unwrap();
+        let mut lock_file = LockFile {
+            version: 1,
+            plugins: vec![],
+        };
+        lock_file.merge_plugins(installed_plugins);
+        lock_file.save(&test_env.lock_file_path).unwrap();
+
+        let github_clone = test_env
+            .data_dir
+            .join("github.com")
+            .join("owner")
+            .join("repo");
+        let gitlab_clone = test_env
+            .data_dir
+            .join("gitlab.com")
+            .join("owner")
+            .join("repo");
+        assert!(github_clone.join(".git").exists());
+        assert!(gitlab_clone.join(".git").exists());
+
+        let saved_lock = crate::lock_file::load(&test_env.lock_file_path).unwrap();
+        let lock_repos = saved_lock
+            .plugins
+            .iter()
+            .map(|p| p.repo.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            lock_repos
+                .iter()
+                .any(|repo| repo == "github.com/owner/repo")
+        );
+        assert!(
+            lock_repos
+                .iter()
+                .any(|repo| repo == "gitlab.com/owner/repo")
+        );
+
+        let fish_conf_d = test_env.fish_config_dir.join(TargetDir::ConfD.as_str());
+        assert!(fish_conf_d.join("github-repo.fish").exists());
+        assert!(fish_conf_d.join("gitlab-repo.fish").exists());
     }
 
     #[tokio::test(flavor = "multi_thread")]
