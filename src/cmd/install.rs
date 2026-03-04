@@ -289,7 +289,12 @@ fn prepare_plugin_from_resolved(
                     Emoji("🔄 ", ""),
                     &locked.commit_sha
                 );
-                let _ = git::checkout_commit(repo, &locked.commit_sha);
+                git::checkout_commit(repo, &locked.commit_sha).with_context(|| {
+                    format!(
+                        "failed to checkout pinned commit {} for repository {}",
+                        &locked.commit_sha, &source_base
+                    )
+                })?;
             }
             locked.commit_sha.clone()
         }
@@ -1235,6 +1240,68 @@ mod tests {
     }
 
     #[test]
+    fn install_all_fails_when_pinned_commit_checkout_fails() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let remote_root = tempfile::tempdir().unwrap();
+        let remote_repo_path = remote_root.path().join("owner").join("broken-pinned");
+        init_remote_repo(&remote_repo_path);
+        let remote_url = format!("file://{}", remote_repo_path.display());
+
+        let plugin_spec = PluginSpec {
+            name: None,
+            source: PluginSource::Url {
+                url: remote_url.clone(),
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![plugin_spec]),
+        });
+        test_env.setup_lock_file(crate::lock_file::LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: repo_for_id.repo.clone(),
+                repo: repo_for_id,
+                source: remote_url,
+                commit_sha: "deadbeef".to_string(),
+                files: vec![],
+            }],
+        });
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let force = false;
+        let prune = false;
+        let result = install_all(&force, &prune);
+        assert!(
+            result.is_err(),
+            "install_all should fail on invalid pinned commit"
+        );
+        let err_text = format!("{:#}", result.unwrap_err());
+        assert!(err_text.contains("failed to checkout pinned commit"));
+    }
+
+    #[test]
     fn install_all_force_keeps_local_data_dir() {
         let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
         let mut test_env = TestEnvironmentSetup::new();
@@ -1484,6 +1551,7 @@ mod tests {
             "__fish_config_dir",
             "XDG_CONFIG_HOME",
             "HOME",
+            "PEZ_SUPPRESS_EMIT",
         ]);
 
         let remote_root = tempfile::tempdir().unwrap();
@@ -1534,6 +1602,7 @@ mod tests {
             std::env::remove_var("__fish_config_dir");
             std::env::remove_var("XDG_CONFIG_HOME");
             std::env::set_var("HOME", test_env._temp_dir.path());
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
         }
 
         let force = true;
@@ -1570,6 +1639,7 @@ mod tests {
             "__fish_config_dir",
             "XDG_CONFIG_HOME",
             "HOME",
+            "PEZ_SUPPRESS_EMIT",
         ]);
 
         let remote_root = tempfile::tempdir().unwrap();
@@ -1619,6 +1689,7 @@ mod tests {
             std::env::remove_var("__fish_config_dir");
             std::env::remove_var("XDG_CONFIG_HOME");
             std::env::set_var("HOME", test_env._temp_dir.path());
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
         }
 
         let force = true;
