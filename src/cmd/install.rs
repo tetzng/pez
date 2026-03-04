@@ -11,7 +11,7 @@ use crate::{
 use anyhow::Context;
 use console::Emoji;
 use futures::{StreamExt, stream};
-use std::{fs, path, result, sync::Arc};
+use std::{collections::HashSet, fs, path, result, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
@@ -112,6 +112,19 @@ fn add_plugins_to_config(
     Ok(())
 }
 
+enum ExistingRepoPolicy {
+    CliInstall,
+    InstallAll,
+}
+
+enum PreparedInstall {
+    Prepared {
+        plugin: Plugin,
+        repo_base: path::PathBuf,
+    },
+    Skipped,
+}
+
 async fn clone_plugins(
     resolved_targets: &[ResolvedInstallTarget],
     force: bool,
@@ -129,155 +142,29 @@ async fn clone_plugins(
             let pez_data_dir = pez_data_dir.to_path_buf();
             async move {
                 let plugin_repo = resolved.plugin_repo.clone();
-                let plugin_repo_str = plugin_repo.as_str();
-                let repo_path = pez_data_dir.join(&plugin_repo_str);
+                let locked_opt = lock_file
+                    .lock()
+                    .await
+                    .get_plugin_by_repo(&plugin_repo)
+                    .cloned();
+                let plugin_name = plugin_repo.repo.clone();
 
-                if repo_path.exists()
-                    && let Err(e) = handle_existing_repository(&force, &plugin_repo, &repo_path)
-                {
-                    warn!(
-                        "Failed to prepare existing repository {}: {:?}",
-                        repo_path.display(),
-                        e
-                    );
-                    return; // skip this plugin task on error
-                }
-
-                let base_source = resolved.source.clone();
-
-                let repo_path_display = repo_path.display();
-                info!(
-                    "{}Cloning repository from {} to {}",
-                    Emoji("🔗 ", ""),
-                    &base_source,
-                    repo_path_display
-                );
-                if resolved.is_local {
-                    // Local source; skip clone. We'll copy files from `base_source` later in sync.
-                    let name = &plugin_repo.repo;
-                    let new_plugin = Plugin {
-                        name: name.to_string(),
-                        repo: plugin_repo.clone(),
-                        source: base_source.clone(),
-                        commit_sha: "local".to_string(),
-                        files: vec![],
-                    };
-                    new_lock_plugins.lock().await.push(new_plugin);
-                    return;
-                }
-
-                if let Err(e) = ensure_repo_parent(&repo_path) {
-                    warn!(
-                        "Failed to prepare parent directory for {}: {:?}",
-                        repo_path.display(),
-                        e
-                    );
-                    return;
-                }
-
-                let repo = match git::clone_repository(&base_source, &repo_path) {
-                    Ok(r) => r,
+                match prepare_plugin_from_resolved(
+                    &plugin_name,
+                    &resolved,
+                    locked_opt.as_ref(),
+                    force,
+                    &pez_data_dir,
+                    ExistingRepoPolicy::CliInstall,
+                ) {
+                    Ok(PreparedInstall::Prepared { plugin, .. }) => {
+                        new_lock_plugins.lock().await.push(plugin);
+                    }
+                    Ok(PreparedInstall::Skipped) => {}
                     Err(e) => {
-                        warn!(
-                            "Failed to clone {} to {}: {:?}",
-                            base_source,
-                            repo_path.display(),
-                            e
-                        );
-                        return;
+                        warn!("Failed to prepare plugin {}: {:?}", plugin_repo, e);
                     }
-                };
-                let name = &plugin_repo.repo;
-                let new_plugin = {
-                    let locked_opt = lock_file
-                        .lock()
-                        .await
-                        .get_plugin_by_repo(&plugin_repo)
-                        .cloned();
-                    if let Some(lock_file_plugin) = locked_opt {
-                        if !force {
-                            info!(
-                                "{}Checking out commit sha: {}",
-                                Emoji("🔄 ", ""),
-                                &lock_file_plugin.commit_sha
-                            );
-                            if let Err(e) =
-                                git::checkout_commit(&repo, &lock_file_plugin.commit_sha)
-                            {
-                                warn!(
-                                    "Failed to detach HEAD to {}: {:?}",
-                                    lock_file_plugin.commit_sha, e
-                                );
-                            }
-                            Plugin {
-                                name: name.to_string(),
-                                repo: plugin_repo.clone(),
-                                source: base_source.clone(),
-                                commit_sha: lock_file_plugin.commit_sha.clone(),
-                                files: vec![],
-                            }
-                        } else {
-                            // force: resolve newest according to ref_kind
-                            let sel = resolver::selection_from_ref_kind(&resolved.ref_kind);
-                            let commit_sha = match git::resolve_selection(&repo, &sel) {
-                                std::result::Result::Ok(sha) => sha,
-                                Err(e) => {
-                                    warn!(
-                                        "Failed to resolve selection: {:?}. Falling back to HEAD.",
-                                        e
-                                    );
-                                    match git::get_latest_commit_sha(&repo) {
-                                        Ok(s) => s,
-                                        Err(e) => {
-                                            warn!("Failed to read HEAD commit: {:?}", e);
-                                            return;
-                                        }
-                                    }
-                                }
-                            };
-                            if let Err(e) = git::checkout_commit(&repo, &commit_sha) {
-                                warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
-                            }
-                            Plugin {
-                                name: name.to_string(),
-                                repo: plugin_repo.clone(),
-                                source: base_source.clone(),
-                                commit_sha,
-                                files: vec![],
-                            }
-                        }
-                    } else {
-                        // fresh install: resolve selection
-                        let sel = resolver::selection_from_ref_kind(&resolved.ref_kind);
-                        let commit_sha = match git::resolve_selection(&repo, &sel) {
-                            std::result::Result::Ok(sha) => sha,
-                            Err(e) => {
-                                warn!(
-                                    "Failed to resolve selection: {:?}. Falling back to HEAD.",
-                                    e
-                                );
-                                match git::get_latest_commit_sha(&repo) {
-                                    Ok(s) => s,
-                                    Err(e) => {
-                                        warn!("Failed to read HEAD commit: {:?}", e);
-                                        return;
-                                    }
-                                }
-                            }
-                        };
-                        if let Err(e) = git::checkout_commit(&repo, &commit_sha) {
-                            warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
-                        }
-                        Plugin {
-                            name: name.to_string(),
-                            repo: plugin_repo.clone(),
-                            source: base_source.clone(),
-                            commit_sha,
-                            files: vec![],
-                        }
-                    }
-                };
-                new_lock_plugins.lock().await.push(new_plugin);
+                }
             }
         })
         .await;
@@ -308,11 +195,207 @@ fn handle_existing_repository(
     Ok(())
 }
 
+fn prepare_plugin_from_resolved(
+    plugin_name: &str,
+    resolved: &ResolvedInstallTarget,
+    locked_plugin: Option<&Plugin>,
+    force: bool,
+    pez_data_dir: &path::Path,
+    existing_repo_policy: ExistingRepoPolicy,
+) -> anyhow::Result<PreparedInstall> {
+    let repo_for_id = resolved.plugin_repo.clone();
+    let source_base = resolved.source.clone();
+    let ref_kind = resolved.ref_kind.clone();
+    let repo_path = pez_data_dir.join(repo_for_id.as_str());
+    let is_local_source = git::is_local_source(&source_base);
+
+    match existing_repo_policy {
+        ExistingRepoPolicy::CliInstall => {
+            if repo_path.exists() {
+                handle_existing_repository(&force, &repo_for_id, &repo_path)?;
+            }
+        }
+        ExistingRepoPolicy::InstallAll => {
+            if let Some(_locked) = locked_plugin
+                && repo_path.exists()
+                && !force
+            {
+                info!(
+                    "{}Skipped: {} is already installed.",
+                    Emoji("⏭️  ", ""),
+                    repo_for_id
+                );
+                return Ok(PreparedInstall::Skipped);
+            }
+
+            if repo_path.exists() && !is_local_source {
+                if force {
+                    fs::remove_dir_all(&repo_path).with_context(|| {
+                        format!("failed to remove existing repo at {}", repo_path.display())
+                    })?;
+                } else if locked_plugin.is_none() {
+                    anyhow::bail!(
+                        "Plugin already exists: {} (path: {}). Use --force to reinstall",
+                        repo_for_id,
+                        repo_path.display()
+                    );
+                }
+            }
+        }
+    }
+
+    let repo = if is_local_source {
+        None
+    } else {
+        info!(
+            "{}Cloning repository from {} to {}",
+            Emoji("🔗 ", ""),
+            &source_base,
+            repo_path.display()
+        );
+        ensure_repo_parent(&repo_path)?;
+        Some(
+            git::clone_repository(&source_base, &repo_path).with_context(|| {
+                format!(
+                    "failed to clone {} into {}",
+                    &source_base,
+                    repo_path.display()
+                )
+            })?,
+        )
+    };
+
+    let commit_sha = if let Some(locked) = locked_plugin {
+        if force {
+            if let Some(repo) = &repo {
+                let sel = resolver::selection_from_ref_kind(&ref_kind);
+                match git::resolve_selection(repo, &sel) {
+                    std::result::Result::Ok(sha) => sha,
+                    Err(e) => {
+                        warn!(
+                            "Failed to resolve selection: {:?}. Falling back to HEAD.",
+                            e
+                        );
+                        git::get_latest_commit_sha(repo)?
+                    }
+                }
+            } else {
+                "local".to_string()
+            }
+        } else {
+            if let Some(repo) = &repo {
+                info!(
+                    "{}Using pinned commit: {}",
+                    Emoji("🔄 ", ""),
+                    &locked.commit_sha
+                );
+                git::checkout_commit(repo, &locked.commit_sha).with_context(|| {
+                    format!(
+                        "failed to checkout pinned commit {} for repository {}",
+                        &locked.commit_sha, &source_base
+                    )
+                })?;
+            }
+            locked.commit_sha.clone()
+        }
+    } else if is_local_source {
+        info!(
+            "{}Installing from local path: {}",
+            Emoji("📁 ", ""),
+            &source_base
+        );
+        "local".to_string()
+    } else {
+        let repo = repo
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("expected cloned repository for remote source"))?;
+        let sel = resolver::selection_from_ref_kind(&ref_kind);
+        let commit_sha = match git::resolve_selection(repo, &sel) {
+            std::result::Result::Ok(sha) => sha,
+            Err(e) => {
+                warn!(
+                    "Failed to resolve selection: {:?}. Falling back to HEAD.",
+                    e
+                );
+                git::get_latest_commit_sha(repo)?
+            }
+        };
+        if let Err(e) = git::checkout_commit(repo, &commit_sha) {
+            warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
+        }
+        commit_sha
+    };
+
+    if locked_plugin.is_some()
+        && force
+        && let Some(repo) = &repo
+        && let Err(e) = git::checkout_commit(repo, &commit_sha)
+    {
+        warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
+    }
+
+    debug!(
+        repo = %repo_for_id,
+        source = %source_base,
+        commit = %commit_sha,
+        "Install resolved commit"
+    );
+
+    let plugin = Plugin {
+        name: plugin_name.to_string(),
+        repo: repo_for_id,
+        source: source_base.clone(),
+        commit_sha,
+        files: vec![],
+    };
+
+    let repo_base = if is_local_source {
+        path::PathBuf::from(&source_base)
+    } else {
+        repo_path
+    };
+
+    Ok(PreparedInstall::Prepared { plugin, repo_base })
+}
+
+enum CopyStrategy {
+    Dedupe,
+    Direct,
+}
+
+fn copy_prepared_plugin_files(
+    plugin: &mut Plugin,
+    repo_base: &path::Path,
+    fish_config_dir: &path::Path,
+    dest_paths: Option<&mut HashSet<path::PathBuf>>,
+    copy_strategy: CopyStrategy,
+) -> anyhow::Result<()> {
+    match copy_strategy {
+        CopyStrategy::Dedupe => {
+            info!("{}Copying files:", Emoji("📂 ", ""));
+            let outcome =
+                utils::copy_plugin_files(repo_base, fish_config_dir, plugin, dest_paths, true)?;
+            if outcome.skipped_due_to_duplicate {
+                warn!(
+                    "{} Skipping plugin due to duplicate: {}",
+                    Emoji("🚨 ", ""),
+                    plugin.repo
+                );
+                plugin.files.clear();
+            }
+            Ok(())
+        }
+        CopyStrategy::Direct => {
+            utils::copy_plugin_files_from_repo(repo_base, plugin)?;
+            Ok(())
+        }
+    }
+}
+
 async fn sync_plugin_files(
     new_plugins: &mut [Plugin],
     pez_data_dir: &path::Path,
 ) -> anyhow::Result<Vec<Plugin>> {
-    use std::collections::HashSet;
     info!(
         "\n{}Copying plugin files to fish config directory...",
         Emoji("🐟 ", "")
@@ -327,27 +410,78 @@ async fn sync_plugin_files(
             pez_data_dir.join(plugin.repo.as_str())
         };
 
-        info!("{}Copying files:", Emoji("📂 ", ""));
-        let outcome =
-            utils::copy_plugin_files(&repo_path, &config_dir, plugin, Some(&mut dest_paths), true)?;
-        if outcome.skipped_due_to_duplicate {
-            warn!(
-                "{} Skipping plugin due to duplicate: {}",
-                Emoji("🚨 ", ""),
-                plugin.repo
-            );
-            // Clear any partially accumulated file records for safety
-            plugin.files.clear();
-        }
+        copy_prepared_plugin_files(
+            plugin,
+            &repo_path,
+            &config_dir,
+            Some(&mut dest_paths),
+            CopyStrategy::Dedupe,
+        )?;
     }
 
     Ok(new_plugins.to_vec())
 }
 
+enum InstallOutcome {
+    Installed(Plugin),
+    Skipped,
+}
+
+fn install_resolved_target(
+    plugin_spec: &config::PluginSpec,
+    resolved: &ResolvedInstallTarget,
+    locked_plugin: Option<&Plugin>,
+    force: bool,
+    pez_data_dir: &path::Path,
+    fish_config_dir: &path::Path,
+    dest_paths: &mut HashSet<path::PathBuf>,
+) -> anyhow::Result<InstallOutcome> {
+    let repo_for_id = resolved.plugin_repo.clone();
+    let plugin_name = plugin_spec.get_name()?;
+
+    info!("\n{}Installing plugin: {}", Emoji("🐟 ", ""), &repo_for_id);
+
+    let prepared = prepare_plugin_from_resolved(
+        &plugin_name,
+        resolved,
+        locked_plugin,
+        force,
+        pez_data_dir,
+        ExistingRepoPolicy::InstallAll,
+    )?;
+
+    let (mut plugin, repo_base) = match prepared {
+        PreparedInstall::Prepared { plugin, repo_base } => (plugin, repo_base),
+        PreparedInstall::Skipped => return Ok(InstallOutcome::Skipped),
+    };
+
+    if locked_plugin.is_some() {
+        copy_prepared_plugin_files(
+            &mut plugin,
+            &repo_base,
+            fish_config_dir,
+            Some(dest_paths),
+            CopyStrategy::Dedupe,
+        )?;
+    } else {
+        copy_prepared_plugin_files(
+            &mut plugin,
+            &repo_base,
+            fish_config_dir,
+            None,
+            CopyStrategy::Direct,
+        )?;
+    }
+
+    emit_event(&plugin, &utils::Event::Install)?;
+    Ok(InstallOutcome::Installed(plugin))
+}
+
 fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
-    use std::collections::HashSet;
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
     let (config, _) = utils::load_config()?;
+    let pez_data_dir = utils::load_pez_data_dir()?;
+    let fish_config_dir = utils::load_fish_config_dir()?;
 
     let plugin_specs = match config.plugins {
         Some(plugins) => plugins,
@@ -363,183 +497,20 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
     for plugin_spec in plugin_specs.iter() {
         let resolved = plugin_spec.to_resolved()?;
         let repo_for_id = resolved.plugin_repo.clone();
-        let source_base = resolved.source.clone();
-        let ref_kind = resolved.ref_kind.clone();
-        let repo_path = utils::load_pez_data_dir()?.join(repo_for_id.as_str());
-
-        info!("\n{}Installing plugin: {}", Emoji("🐟 ", ""), &repo_for_id);
-        match lock_file.get_plugin_by_repo(&repo_for_id) {
-            Some(locked_plugin) => {
-                if repo_path.exists() && !*force {
-                    info!(
-                        "{}Skipped: {} is already installed.",
-                        Emoji("⏭️  ", ""),
-                        repo_for_id
-                    );
-
-                    continue;
-                }
-
-                let repo_path_display = repo_path.display();
-                info!(
-                    "{}Cloning repository from {} to {}",
-                    Emoji("🔗 ", ""),
-                    &source_base,
-                    repo_path_display
-                );
-                // For local path sources, cloning is not applicable
-                let is_local_source = git::is_local_source(&source_base);
-                if repo_path.exists() && *force && !is_local_source {
-                    fs::remove_dir_all(&repo_path).with_context(|| {
-                        format!("failed to remove existing repo at {}", repo_path.display())
-                    })?;
-                }
-
-                let repo = if is_local_source {
-                    None
-                } else {
-                    ensure_repo_parent(&repo_path)?;
-                    Some(
-                        git::clone_repository(&source_base, &repo_path).with_context(|| {
-                            format!(
-                                "failed to clone {} into {}",
-                                &source_base,
-                                repo_path.display()
-                            )
-                        })?,
-                    )
-                };
-                let commit_sha = if *force {
-                    if let Some(repo) = &repo {
-                        let sel = resolver::selection_from_ref_kind(&ref_kind);
-                        match git::resolve_selection(repo, &sel) {
-                            std::result::Result::Ok(sha) => sha,
-                            Err(e) => {
-                                warn!(
-                                    "Failed to resolve selection: {:?}. Falling back to pinned.",
-                                    e
-                                );
-                                locked_plugin.commit_sha.clone()
-                            }
-                        }
-                    } else {
-                        "local".to_string()
-                    }
-                } else {
-                    if let Some(repo) = &repo {
-                        info!(
-                            "{}Using pinned commit: {}",
-                            Emoji("🔄 ", ""),
-                            &locked_plugin.commit_sha
-                        );
-                        let _ = git::checkout_commit(repo, &locked_plugin.commit_sha);
-                    }
-                    locked_plugin.commit_sha.clone()
-                };
-                if *force
-                    && let Some(repo) = &repo
-                    && let Err(e) = git::checkout_commit(repo, &commit_sha)
-                {
-                    warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
-                }
-                debug!(repo = %repo_for_id, source = %source_base, commit = %commit_sha, "Install resolved commit");
-                let mut plugin = Plugin {
-                    name: plugin_spec.get_name()?,
-                    repo: repo_for_id.clone(),
-                    source: source_base.to_string(),
-                    commit_sha,
-                    files: vec![],
-                };
-                let (repo_base, config_dir) = if git::is_local_source(&source_base) {
-                    (
-                        path::PathBuf::from(&source_base),
-                        utils::load_fish_config_dir()?,
-                    )
-                } else {
-                    (repo_path.clone(), utils::load_fish_config_dir()?)
-                };
-
-                info!("{}Copying files:", Emoji("📂 ", ""));
-                let outcome = utils::copy_plugin_files(
-                    &repo_base,
-                    &config_dir,
-                    &mut plugin,
-                    Some(&mut dest_paths),
-                    true,
-                )?;
-                if outcome.skipped_due_to_duplicate {
-                    warn!(
-                        "{} Skipping plugin due to duplicate: {}",
-                        Emoji("🚨 ", ""),
-                        plugin.repo
-                    );
-                    plugin.files.clear();
-                }
-                emit_event(&plugin, &utils::Event::Install)?;
-
-                if let Err(e) = lock_file.upsert_plugin_by_repo(plugin) {
-                    warn!("Failed to update lock file entry: {:?}", e);
-                }
-                lock_file.save(&lock_file_path)?;
+        let outcome = install_resolved_target(
+            plugin_spec,
+            &resolved,
+            lock_file.get_plugin_by_repo(&repo_for_id),
+            *force,
+            &pez_data_dir,
+            &fish_config_dir,
+            &mut dest_paths,
+        )?;
+        if let InstallOutcome::Installed(plugin) = outcome {
+            if let Err(e) = lock_file.upsert_plugin_by_repo(plugin) {
+                warn!("Failed to update lock file entry: {:?}", e);
             }
-            None => {
-                if repo_path.exists() && !git::is_local_source(&source_base) {
-                    if *force {
-                        fs::remove_dir_all(&repo_path)?;
-                    } else {
-                        anyhow::bail!(
-                            "Plugin already exists: {} (path: {}). Use --force to reinstall",
-                            repo_for_id,
-                            repo_path.display()
-                        );
-                    }
-                }
-
-                let commit_sha = if git::is_local_source(&source_base) {
-                    info!(
-                        "{}Installing from local path: {}",
-                        Emoji("📁 ", ""),
-                        &source_base
-                    );
-                    "local".to_string()
-                } else {
-                    ensure_repo_parent(&repo_path)?;
-                    let repo = git::clone_repository(&source_base, &repo_path)?;
-                    let sel = resolver::selection_from_ref_kind(&ref_kind);
-                    let commit_sha = match git::resolve_selection(&repo, &sel) {
-                        std::result::Result::Ok(sha) => sha,
-                        Err(e) => {
-                            warn!(
-                                "Failed to resolve selection: {:?}. Falling back to HEAD.",
-                                e
-                            );
-                            git::get_latest_commit_sha(&repo)?
-                        }
-                    };
-                    if let Err(e) = git::checkout_commit(&repo, &commit_sha) {
-                        warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
-                    }
-                    commit_sha
-                };
-                let mut plugin = Plugin {
-                    name: plugin_spec.get_name()?,
-                    repo: repo_for_id.clone(),
-                    source: source_base.to_string(),
-                    commit_sha,
-                    files: vec![],
-                };
-                if git::is_local_source(&source_base) {
-                    utils::copy_plugin_files_from_repo(path::Path::new(&source_base), &mut plugin)?;
-                } else {
-                    utils::copy_plugin_files_from_repo(&repo_path, &mut plugin)?;
-                }
-                emit_event(&plugin, &utils::Event::Install)?;
-
-                if let Err(e) = lock_file.upsert_plugin_by_repo(plugin) {
-                    warn!("Failed to add lock file entry: {:?}", e);
-                }
-                lock_file.save(&lock_file_path)?;
-            }
+            lock_file.save(&lock_file_path)?;
         }
     }
 
@@ -968,6 +939,51 @@ mod tests {
         assert!(fish_file.exists());
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_install_fails_when_target_dir_is_file() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let source_dir = test_env._temp_dir.path().join("local-plugin-fail");
+        let conf_dir = source_dir.join(TargetDir::ConfD.as_str());
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        std::fs::write(conf_dir.join("local-plugin-fail.fish"), "echo local\n").unwrap();
+
+        std::fs::remove_dir_all(&test_env.fish_config_dir).unwrap();
+        std::fs::write(&test_env.fish_config_dir, "not-a-directory").unwrap();
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let args = InstallArgs {
+            plugins: Some(vec![InstallTarget::from_raw(
+                source_dir.to_string_lossy().to_string(),
+            )]),
+            force: false,
+            prune: false,
+        };
+
+        let result =
+            tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(run(&args)));
+        assert!(
+            result.is_err(),
+            "install should fail when target dir is not a directory"
+        );
+    }
+
     #[test]
     fn run_installs_multi_host_same_owner_repo_with_distinct_paths_and_lock_rows() {
         let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
@@ -1224,6 +1240,68 @@ mod tests {
     }
 
     #[test]
+    fn install_all_fails_when_pinned_commit_checkout_fails() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let remote_root = tempfile::tempdir().unwrap();
+        let remote_repo_path = remote_root.path().join("owner").join("broken-pinned");
+        init_remote_repo(&remote_repo_path);
+        let remote_url = format!("file://{}", remote_repo_path.display());
+
+        let plugin_spec = PluginSpec {
+            name: None,
+            source: PluginSource::Url {
+                url: remote_url.clone(),
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![plugin_spec]),
+        });
+        test_env.setup_lock_file(crate::lock_file::LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: repo_for_id.repo.clone(),
+                repo: repo_for_id,
+                source: remote_url,
+                commit_sha: "deadbeef".to_string(),
+                files: vec![],
+            }],
+        });
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let force = false;
+        let prune = false;
+        let result = install_all(&force, &prune);
+        assert!(
+            result.is_err(),
+            "install_all should fail on invalid pinned commit"
+        );
+        let err_text = format!("{:#}", result.unwrap_err());
+        assert!(err_text.contains("failed to checkout pinned commit"));
+    }
+
+    #[test]
     fn install_all_force_keeps_local_data_dir() {
         let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
         let mut test_env = TestEnvironmentSetup::new();
@@ -1473,6 +1551,7 @@ mod tests {
             "__fish_config_dir",
             "XDG_CONFIG_HOME",
             "HOME",
+            "PEZ_SUPPRESS_EMIT",
         ]);
 
         let remote_root = tempfile::tempdir().unwrap();
@@ -1523,6 +1602,7 @@ mod tests {
             std::env::remove_var("__fish_config_dir");
             std::env::remove_var("XDG_CONFIG_HOME");
             std::env::set_var("HOME", test_env._temp_dir.path());
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
         }
 
         let force = true;
@@ -1546,5 +1626,83 @@ mod tests {
         let updated_plugin = saved_lock.get_plugin_by_repo(&plugin_repo).unwrap();
         assert_eq!(updated_plugin.commit_sha, expected_commit);
         assert_eq!(updated_plugin.source, remote_url);
+    }
+
+    #[test]
+    fn install_all_force_unresolvable_selector_falls_back_to_head() {
+        let _log_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let remote_root = tempfile::tempdir().unwrap();
+        let remote_repo_path = remote_root
+            .path()
+            .join("owner")
+            .join("force-missing-selector");
+        let (first_commit, head_commit) = init_remote_repo_with_two_commits(&remote_repo_path);
+        let remote_url = format!("file://{}", remote_repo_path.display());
+
+        let plugin_repo = PluginRepo {
+            host: None,
+            owner: "owner".to_string(),
+            repo: "force-missing-selector".to_string(),
+        };
+
+        let plugin_spec = PluginSpec {
+            name: None,
+            source: PluginSource::Url {
+                url: remote_url.clone(),
+                version: None,
+                branch: Some("missing-branch".to_string()),
+                tag: None,
+                commit: None,
+            },
+        };
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![plugin_spec]),
+        });
+
+        let lock_plugin = Plugin {
+            name: plugin_repo.repo.clone(),
+            repo: plugin_repo.clone(),
+            source: remote_url.clone(),
+            commit_sha: first_commit.clone(),
+            files: vec![],
+        };
+        test_env.setup_lock_file(crate::lock_file::LockFile {
+            version: 1,
+            plugins: vec![lock_plugin],
+        });
+
+        unsafe {
+            std::env::set_var("PEZ_CONFIG_DIR", &test_env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &test_env.data_dir);
+            std::env::set_var("PEZ_TARGET_DIR", &test_env.fish_config_dir);
+            std::env::remove_var("__fish_config_dir");
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::set_var("HOME", test_env._temp_dir.path());
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let force = true;
+        let prune = false;
+        let result = install_all(&force, &prune);
+        assert!(
+            result.is_ok(),
+            "install_all should succeed and fall back to HEAD when selector cannot be resolved"
+        );
+
+        let saved_lock = crate::lock_file::load(&test_env.lock_file_path).unwrap();
+        let updated_plugin = saved_lock.get_plugin_by_repo(&plugin_repo).unwrap();
+        assert_eq!(updated_plugin.commit_sha, head_commit);
+        assert_ne!(updated_plugin.commit_sha, first_commit);
     }
 }
