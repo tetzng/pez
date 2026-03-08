@@ -10,8 +10,8 @@ use crate::{
 
 use anyhow::Context;
 use console::Emoji;
-use futures::{StreamExt, stream};
-use std::{collections::HashSet, fs, path, result, sync::Arc};
+use futures::{StreamExt, TryStreamExt, stream};
+use std::{collections::HashSet, fs, path, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
@@ -132,12 +132,10 @@ async fn clone_plugins(
     pez_data_dir: &path::Path,
 ) -> anyhow::Result<Vec<Plugin>> {
     let lock_file = Arc::new(Mutex::new(lock_file));
-    let new_lock_plugins: Arc<Mutex<Vec<Plugin>>> = Arc::new(Mutex::new(vec![]));
 
     let jobs = utils::load_jobs().max(1);
-    stream::iter(resolved_targets.iter().cloned())
-        .for_each_concurrent(jobs, |resolved| {
-            let new_lock_plugins = Arc::clone(&new_lock_plugins);
+    let prepared_plugins = stream::iter(resolved_targets.iter().cloned())
+        .map(|resolved| {
             let lock_file = Arc::clone(&lock_file);
             let pez_data_dir = pez_data_dir.to_path_buf();
             async move {
@@ -149,32 +147,29 @@ async fn clone_plugins(
                     .cloned();
                 let plugin_name = plugin_repo.repo.clone();
 
-                match prepare_plugin_from_resolved(
+                let prepared = prepare_plugin_from_resolved(
                     &plugin_name,
                     &resolved,
                     locked_opt.as_ref(),
                     force,
                     &pez_data_dir,
                     ExistingRepoPolicy::CliInstall,
-                ) {
-                    Ok(PreparedInstall::Prepared { plugin, .. }) => {
-                        new_lock_plugins.lock().await.push(plugin);
+                )
+                .with_context(|| format!("failed to prepare plugin {}", plugin_repo))?;
+
+                match prepared {
+                    PreparedInstall::Prepared { plugin, .. } => {
+                        Ok::<Option<Plugin>, anyhow::Error>(Some(plugin))
                     }
-                    Ok(PreparedInstall::Skipped) => {}
-                    Err(e) => {
-                        warn!("Failed to prepare plugin {}: {:?}", plugin_repo, e);
-                    }
+                    PreparedInstall::Skipped => Ok::<Option<Plugin>, anyhow::Error>(None),
                 }
             }
         })
-        .await;
+        .buffer_unordered(jobs)
+        .try_collect::<Vec<_>>()
+        .await?;
 
-    let new_lock_plugins_result = Arc::try_unwrap(new_lock_plugins);
-
-    match new_lock_plugins_result {
-        result::Result::Ok(new_lock_plugins) => Ok(new_lock_plugins.into_inner()),
-        Err(_) => anyhow::bail!("Internal error: pending references to new_lock_plugins remain"),
-    }
+    Ok(prepared_plugins.into_iter().flatten().collect())
 }
 
 fn handle_existing_repository(
@@ -1107,6 +1102,38 @@ mod tests {
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].commit_sha, first);
         assert_ne!(plugins[0].commit_sha, second);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn clone_plugins_fails_when_locked_commit_checkout_fails() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let remote_repo_path = temp_dir.path().join("owner").join("broken-pinned");
+        let remote_url = format!("file://{}", remote_repo_path.display());
+        init_remote_repo(&remote_repo_path);
+
+        let resolved = InstallTarget::from_raw(remote_url.clone())
+            .resolve()
+            .unwrap();
+        let lock_file = LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: resolved.plugin_repo.repo.clone(),
+                repo: resolved.plugin_repo.clone(),
+                source: remote_url,
+                commit_sha: "deadbeef".to_string(),
+                files: vec![],
+            }],
+        };
+        let data_dir = temp_dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let err = clone_plugins(&[resolved], false, lock_file, &data_dir)
+            .await
+            .unwrap_err();
+        let err_text = format!("{:#}", err);
+
+        assert!(err_text.contains("failed to prepare plugin"));
+        assert!(err_text.contains("failed to checkout pinned commit deadbeef"));
     }
 
     #[test]
