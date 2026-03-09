@@ -207,7 +207,16 @@ fn prepare_plugin_from_resolved(
     match existing_repo_policy {
         ExistingRepoPolicy::CliInstall => {
             if repo_path.exists() {
-                handle_existing_repository(&force, &repo_for_id, &repo_path)?;
+                if force {
+                    handle_existing_repository(&force, &repo_for_id, &repo_path)?;
+                } else {
+                    warn!(
+                        "{}Skipped: {} is already installed. Use --force to reinstall",
+                        Emoji("⚠ ", ""),
+                        repo_for_id
+                    );
+                    return Ok(PreparedInstall::Skipped);
+                }
             }
         }
         ExistingRepoPolicy::InstallAll => {
@@ -1134,6 +1143,34 @@ mod tests {
 
         assert!(err_text.contains("failed to prepare plugin"));
         assert!(err_text.contains("failed to checkout pinned commit deadbeef"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn clone_plugins_skips_existing_repo_for_cli_install_without_force() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let remote_repo_path = temp_dir.path().join("owner").join("repeatable-repo");
+        let remote_url = format!("file://{}", remote_repo_path.display());
+        init_remote_repo(&remote_repo_path);
+
+        let resolved = InstallTarget::from_raw(remote_url).resolve().unwrap();
+        let data_dir = temp_dir.path().join("data");
+        let existing_repo_path = data_dir.join(resolved.plugin_repo.as_str());
+        std::fs::create_dir_all(&existing_repo_path).unwrap();
+
+        let plugins = clone_plugins(
+            &[resolved],
+            false,
+            LockFile {
+                version: 1,
+                plugins: vec![],
+            },
+            &data_dir,
+        )
+        .await
+        .unwrap();
+
+        assert!(plugins.is_empty());
+        assert!(existing_repo_path.exists());
     }
 
     #[test]
