@@ -92,6 +92,20 @@ fn ensure_repo_parent(repo_path: &path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn cleanup_failed_repo(repo_path: &path::Path) {
+    if !repo_path.exists() {
+        return;
+    }
+
+    if let Err(err) = fs::remove_dir_all(repo_path) {
+        warn!(
+            repo_path = %repo_path.display(),
+            error = ?err,
+            "Failed to clean up cloned repository after install preparation failure"
+        );
+    }
+}
+
 fn add_plugins_to_config(
     config: &mut config::Config,
     config_path: &path::Path,
@@ -258,108 +272,121 @@ fn prepare_plugin_from_resolved(
             repo_path.display()
         );
         ensure_repo_parent(&repo_path)?;
-        Some(
-            git::clone_repository(&source_base, &repo_path).with_context(|| {
-                format!(
-                    "failed to clone {} into {}",
-                    &source_base,
-                    repo_path.display()
-                )
-            })?,
-        )
-    };
-
-    let commit_sha = if let Some(locked) = locked_plugin {
-        if force {
-            if let Some(repo) = &repo {
-                let sel = resolver::selection_from_ref_kind(&ref_kind);
-                match git::resolve_selection(repo, &sel) {
-                    std::result::Result::Ok(sha) => sha,
-                    Err(e) => {
-                        warn!(
-                            "Failed to resolve selection: {:?}. Falling back to HEAD.",
-                            e
-                        );
-                        git::get_latest_commit_sha(repo)?
-                    }
-                }
-            } else {
-                "local".to_string()
-            }
-        } else {
-            if let Some(repo) = &repo {
-                info!(
-                    "{}Using pinned commit: {}",
-                    Emoji("🔄 ", ""),
-                    &locked.commit_sha
-                );
-                git::checkout_commit(repo, &locked.commit_sha).with_context(|| {
+        let cloned_repo = match git::clone_repository(&source_base, &repo_path) {
+            Ok(repo) => repo,
+            Err(err) => {
+                cleanup_failed_repo(&repo_path);
+                return Err(err).with_context(|| {
                     format!(
-                        "failed to checkout pinned commit {} for repository {}",
-                        &locked.commit_sha, &source_base
+                        "failed to clone {} into {}",
+                        &source_base,
+                        repo_path.display()
                     )
-                })?;
-            }
-            locked.commit_sha.clone()
-        }
-    } else if is_local_source {
-        info!(
-            "{}Installing from local path: {}",
-            Emoji("📁 ", ""),
-            &source_base
-        );
-        "local".to_string()
-    } else {
-        let repo = repo
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("expected cloned repository for remote source"))?;
-        let sel = resolver::selection_from_ref_kind(&ref_kind);
-        let commit_sha = match git::resolve_selection(repo, &sel) {
-            std::result::Result::Ok(sha) => sha,
-            Err(e) => {
-                warn!(
-                    "Failed to resolve selection: {:?}. Falling back to HEAD.",
-                    e
-                );
-                git::get_latest_commit_sha(repo)?
+                });
             }
         };
-        if let Err(e) = git::checkout_commit(repo, &commit_sha) {
+        Some(cloned_repo)
+    };
+
+    let prepared = (|| -> anyhow::Result<PreparedInstall> {
+        let commit_sha = if let Some(locked) = locked_plugin {
+            if force {
+                if let Some(repo) = &repo {
+                    let sel = resolver::selection_from_ref_kind(&ref_kind);
+                    match git::resolve_selection(repo, &sel) {
+                        std::result::Result::Ok(sha) => sha,
+                        Err(e) => {
+                            warn!(
+                                "Failed to resolve selection: {:?}. Falling back to HEAD.",
+                                e
+                            );
+                            git::get_latest_commit_sha(repo)?
+                        }
+                    }
+                } else {
+                    "local".to_string()
+                }
+            } else {
+                if let Some(repo) = &repo {
+                    info!(
+                        "{}Using pinned commit: {}",
+                        Emoji("🔄 ", ""),
+                        &locked.commit_sha
+                    );
+                    git::checkout_commit(repo, &locked.commit_sha).with_context(|| {
+                        format!(
+                            "failed to checkout pinned commit {} for repository {}",
+                            &locked.commit_sha, &source_base
+                        )
+                    })?;
+                }
+                locked.commit_sha.clone()
+            }
+        } else if is_local_source {
+            info!(
+                "{}Installing from local path: {}",
+                Emoji("📁 ", ""),
+                &source_base
+            );
+            "local".to_string()
+        } else {
+            let repo = repo
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("expected cloned repository for remote source"))?;
+            let sel = resolver::selection_from_ref_kind(&ref_kind);
+            let commit_sha = match git::resolve_selection(repo, &sel) {
+                std::result::Result::Ok(sha) => sha,
+                Err(e) => {
+                    warn!(
+                        "Failed to resolve selection: {:?}. Falling back to HEAD.",
+                        e
+                    );
+                    git::get_latest_commit_sha(repo)?
+                }
+            };
+            if let Err(e) = git::checkout_commit(repo, &commit_sha) {
+                warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
+            }
+            commit_sha
+        };
+
+        if locked_plugin.is_some()
+            && force
+            && let Some(repo) = &repo
+            && let Err(e) = git::checkout_commit(repo, &commit_sha)
+        {
             warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
         }
-        commit_sha
-    };
 
-    if locked_plugin.is_some()
-        && force
-        && let Some(repo) = &repo
-        && let Err(e) = git::checkout_commit(repo, &commit_sha)
-    {
-        warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
+        debug!(
+            repo = %repo_for_id,
+            source = %source_base,
+            commit = %commit_sha,
+            "Install resolved commit"
+        );
+
+        let plugin = Plugin {
+            name: plugin_name.to_string(),
+            repo: repo_for_id,
+            source: source_base.clone(),
+            commit_sha,
+            files: vec![],
+        };
+
+        let repo_base = if is_local_source {
+            path::PathBuf::from(&source_base)
+        } else {
+            repo_path.clone()
+        };
+
+        Ok(PreparedInstall::Prepared { plugin, repo_base })
+    })();
+
+    if prepared.is_err() && repo.is_some() {
+        cleanup_failed_repo(&repo_path);
     }
 
-    debug!(
-        repo = %repo_for_id,
-        source = %source_base,
-        commit = %commit_sha,
-        "Install resolved commit"
-    );
-
-    let plugin = Plugin {
-        name: plugin_name.to_string(),
-        repo: repo_for_id,
-        source: source_base.clone(),
-        commit_sha,
-        files: vec![],
-    };
-
-    let repo_base = if is_local_source {
-        path::PathBuf::from(&source_base)
-    } else {
-        repo_path
-    };
-
-    Ok(PreparedInstall::Prepared { plugin, repo_base })
+    prepared
 }
 
 enum CopyStrategy {
@@ -1143,6 +1170,7 @@ mod tests {
 
         assert!(err_text.contains("failed to prepare plugin"));
         assert!(err_text.contains("failed to checkout pinned commit deadbeef"));
+        assert!(!data_dir.join("owner").join("broken-pinned").exists());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1335,6 +1363,7 @@ mod tests {
             },
         };
         let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
+        let repo_path = test_env.data_dir.join(repo_for_id.as_str());
         test_env.setup_config(config::Config {
             plugins: Some(vec![plugin_spec]),
         });
@@ -1363,6 +1392,7 @@ mod tests {
         );
         let err_text = format!("{:#}", result.unwrap_err());
         assert!(err_text.contains("failed to checkout pinned commit"));
+        assert!(!repo_path.exists());
     }
 
     #[test]
