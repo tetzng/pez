@@ -10,7 +10,7 @@ use crate::{
 
 use anyhow::Context;
 use console::Emoji;
-use futures::{StreamExt, TryStreamExt, stream};
+use futures::{StreamExt, stream};
 use std::{collections::HashSet, fs, path, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
@@ -106,6 +106,20 @@ fn cleanup_failed_repo(repo_path: &path::Path) {
     }
 }
 
+fn cleanup_prepared_remote_repos(plugins: &[Plugin], pez_data_dir: &path::Path) {
+    let mut cleaned_paths = HashSet::new();
+    for plugin in plugins {
+        if git::is_local_source(&plugin.source) {
+            continue;
+        }
+
+        let repo_path = pez_data_dir.join(plugin.repo.as_str());
+        if cleaned_paths.insert(repo_path.clone()) {
+            cleanup_failed_repo(&repo_path);
+        }
+    }
+}
+
 fn add_plugins_to_config(
     config: &mut config::Config,
     config_path: &path::Path,
@@ -148,7 +162,7 @@ async fn clone_plugins(
     let lock_file = Arc::new(Mutex::new(lock_file));
 
     let jobs = utils::load_jobs().max(1);
-    let prepared_plugins = stream::iter(resolved_targets.iter().cloned())
+    let prepare_results = stream::iter(resolved_targets.iter().cloned())
         .map(|resolved| {
             let lock_file = Arc::clone(&lock_file);
             let pez_data_dir = pez_data_dir.to_path_buf();
@@ -180,10 +194,29 @@ async fn clone_plugins(
             }
         })
         .buffer_unordered(jobs)
-        .try_collect::<Vec<_>>()
-        .await?;
+        .collect::<Vec<_>>()
+        .await;
 
-    Ok(prepared_plugins.into_iter().flatten().collect())
+    let mut prepared_plugins = Vec::new();
+    let mut first_err = None;
+    for result in prepare_results {
+        match result {
+            Ok(Some(plugin)) => prepared_plugins.push(plugin),
+            Ok(None) => {}
+            Err(err) => {
+                if first_err.is_none() {
+                    first_err = Some(err);
+                }
+            }
+        }
+    }
+
+    if let Some(err) = first_err {
+        cleanup_prepared_remote_repos(&prepared_plugins, pez_data_dir);
+        return Err(err);
+    }
+
+    Ok(prepared_plugins)
 }
 
 fn handle_existing_repository(
@@ -1170,6 +1203,51 @@ mod tests {
 
         assert!(err_text.contains("failed to prepare plugin"));
         assert!(err_text.contains("failed to checkout pinned commit deadbeef"));
+        assert!(!data_dir.join("owner").join("broken-pinned").exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn clone_plugins_rolls_back_successful_remote_clones_when_another_target_fails() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let good_remote_repo_path = temp_dir.path().join("owner").join("good-repo");
+        let bad_remote_repo_path = temp_dir.path().join("owner").join("broken-pinned");
+        let good_remote_url = format!("file://{}", good_remote_repo_path.display());
+        let bad_remote_url = format!("file://{}", bad_remote_repo_path.display());
+        init_remote_repo(&good_remote_repo_path);
+        init_remote_repo(&bad_remote_repo_path);
+
+        let good_resolved = InstallTarget::from_raw(good_remote_url.clone())
+            .resolve()
+            .unwrap();
+        let bad_resolved = InstallTarget::from_raw(bad_remote_url.clone())
+            .resolve()
+            .unwrap();
+        let lock_file = LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: bad_resolved.plugin_repo.repo.clone(),
+                repo: bad_resolved.plugin_repo.clone(),
+                source: bad_remote_url,
+                commit_sha: "deadbeef".to_string(),
+                files: vec![],
+            }],
+        };
+        let data_dir = temp_dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let err = clone_plugins(
+            &[good_resolved.clone(), bad_resolved],
+            false,
+            lock_file,
+            &data_dir,
+        )
+        .await
+        .unwrap_err();
+        let err_text = format!("{:#}", err);
+
+        assert!(err_text.contains("failed to prepare plugin"));
+        assert!(err_text.contains("failed to checkout pinned commit deadbeef"));
+        assert!(!data_dir.join(good_resolved.plugin_repo.as_str()).exists());
         assert!(!data_dir.join("owner").join("broken-pinned").exists());
     }
 
