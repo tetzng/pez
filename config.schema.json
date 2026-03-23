@@ -1,11 +1,8 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "additionalProperties": false,
-  "definitions": {
+  "$defs": {
     "PluginSpec": {
       "anyOf": [
         {
-          "additionalProperties": false,
           "properties": {
             "branch": {
               "default": null,
@@ -45,7 +42,6 @@
           "type": "object"
         },
         {
-          "additionalProperties": false,
           "properties": {
             "branch": {
               "default": null,
@@ -85,7 +81,6 @@
           "type": "object"
         },
         {
-          "additionalProperties": false,
           "properties": {
             "path": {
               "type": "string"
@@ -108,6 +103,8 @@
       "type": "object"
     }
   },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
   "properties": {
     "plugins": {
       "items": {
