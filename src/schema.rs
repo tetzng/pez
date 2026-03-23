@@ -1,11 +1,13 @@
-use schemars::schema_for;
+use schemars::generate::SchemaSettings;
 use serde_json::{Value, json};
 use std::{fs, path};
 
 use crate::config::Config;
 
 pub fn generate_config_schema() -> anyhow::Result<Value> {
-    let schema = schema_for!(Config);
+    let schema = SchemaSettings::draft07()
+        .into_generator()
+        .into_root_schema_for::<Config>();
     let mut value = serde_json::to_value(&schema)?;
 
     apply_overrides(&mut value)?;
@@ -45,7 +47,23 @@ fn apply_overrides(root: &mut Value) -> anyhow::Result<()> {
         }),
     );
 
+    // The derived PluginSpec definition is no longer referenced after we replace
+    // plugins.items with a hand-authored schema, so drop it to avoid drift.
+    remove_plugin_spec_definition(obj, "definitions");
+    remove_plugin_spec_definition(obj, "$defs");
+
     Ok(())
+}
+
+fn remove_plugin_spec_definition(root: &mut serde_json::Map<String, Value>, container_key: &str) {
+    let Some(definitions) = root.get_mut(container_key).and_then(Value::as_object_mut) else {
+        return;
+    };
+
+    definitions.remove("PluginSpec");
+    if definitions.is_empty() {
+        root.remove(container_key);
+    }
 }
 
 fn plugin_spec_schema() -> Value {
@@ -163,5 +181,7 @@ mod tests {
             Some("pez config")
         );
         assert!(schema.get("properties").is_some());
+        assert!(schema.get("$defs").is_none());
+        assert!(schema.pointer("/definitions/PluginSpec").is_none());
     }
 }
