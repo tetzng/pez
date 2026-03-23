@@ -412,6 +412,9 @@ mod tests {
 
     #[test]
     fn resolve_owner_repo_and_variants() {
+        let _lock = env_lock().lock().unwrap();
+        let _cwd_guard = CwdGuard::new();
+
         // owner/repo (github)
         let t: InstallTarget = "o/r".parse().unwrap();
         let r = t.resolve().unwrap();
