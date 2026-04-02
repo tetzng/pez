@@ -350,6 +350,8 @@ pub(crate) async fn run(args: &MigrateArgs) -> anyhow::Result<()> {
             plugins: Some(targets),
             force: false,
             prune: false,
+            emit_hooks: false,
+            no_emit_hooks: false,
         };
         info!("{}Installing migrated plugins...", Emoji("🚀 ", ""));
         crate::cmd::install::run(&install_args).await?;
@@ -512,6 +514,7 @@ mod tests {
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![existing_spec]),
         });
 
@@ -574,6 +577,7 @@ mod tests {
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![existing_spec]),
         });
 
@@ -627,6 +631,7 @@ mod tests {
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![existing_spec]),
         });
 
@@ -706,7 +711,10 @@ mod tests {
             ("PEZ_CONFIG_DIR", env.config_dir.clone().into_os_string()),
         ]);
 
-        env.setup_config(config::Config { plugins: None });
+        env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
+            plugins: None,
+        });
 
         let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
         fs::write(&fish_plugins_path, "git@bitbucket.org:team/pkg.git\n").unwrap();
@@ -745,7 +753,10 @@ mod tests {
             ("PEZ_CONFIG_DIR", env.config_dir.clone().into_os_string()),
         ]);
 
-        env.setup_config(config::Config { plugins: None });
+        env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
+            plugins: None,
+        });
 
         let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
         fs::write(&fish_plugins_path, "owner/repo@\n").unwrap();
@@ -773,7 +784,10 @@ mod tests {
             ("PEZ_CONFIG_DIR", env.config_dir.clone().into_os_string()),
         ]);
 
-        env.setup_config(config::Config { plugins: None });
+        env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
+            plugins: None,
+        });
 
         let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
         fs::write(
@@ -826,6 +840,7 @@ mod tests {
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![existing_spec.clone()]),
         });
 
@@ -874,6 +889,7 @@ mod tests {
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![existing_spec.clone()]),
         });
 
@@ -1089,7 +1105,10 @@ mod tests {
         let vars = env_vars(&env);
         let _guard = EnvGuard::set(&vars);
 
-        env.setup_config(config::Config { plugins: None });
+        env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
+            plugins: None,
+        });
         let fish_plugins_path = env.fish_config_dir.join("fish_plugins");
         fs::write(
             &fish_plugins_path,
@@ -1166,6 +1185,7 @@ mod tests {
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![existing_spec]),
         });
 
@@ -1207,6 +1227,7 @@ mod tests {
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![existing_spec]),
         });
 
@@ -1347,6 +1368,7 @@ mod tests {
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![existing_spec]),
         });
 

@@ -9,7 +9,17 @@ use crate::resolver::{ref_kind_to_repo_source, ref_kind_to_url_source};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    #[serde(default)]
+    pub(crate) shell_hooks: ShellHooksConfig,
     pub(crate) plugins: Option<Vec<PluginSpec>>,
+}
+
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct ShellHooksConfig {
+    pub(crate) emit: bool,
+    pub(crate) source: bool,
 }
 
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
@@ -56,7 +66,10 @@ pub(crate) enum PluginSource {
 }
 
 pub(crate) fn init() -> Config {
-    Config { plugins: None }
+    Config {
+        shell_hooks: ShellHooksConfig::default(),
+        plugins: None,
+    }
 }
 
 pub(crate) fn load(path: &path::PathBuf) -> anyhow::Result<Config> {
@@ -446,7 +459,10 @@ mod internal_tests {
 
     #[test]
     fn ensure_plugin_from_resolved_inserts_once() {
-        let mut config = Config { plugins: None };
+        let mut config = Config {
+            shell_hooks: ShellHooksConfig::default(),
+            plugins: None,
+        };
         let resolved = ResolvedInstallTarget {
             plugin_repo: PluginRepo {
                 host: None,
@@ -466,7 +482,10 @@ mod internal_tests {
 
     #[test]
     fn ensure_plugin_for_repo_inserts_default_spec() {
-        let mut config = Config { plugins: None };
+        let mut config = Config {
+            shell_hooks: ShellHooksConfig::default(),
+            plugins: None,
+        };
         let repo = PluginRepo {
             host: None,
             owner: "o".into(),
@@ -751,6 +770,7 @@ branch = "main"
     #[test]
     fn config_validate_rejects_relative_path() {
         let config = Config {
+            shell_hooks: ShellHooksConfig::default(),
             plugins: Some(vec![PluginSpec {
                 name: None,
                 source: PluginSource::Path {
@@ -764,5 +784,24 @@ branch = "main"
             msg.contains("invalid plugins[0]") || msg.contains("path must be absolute"),
             "{msg}"
         );
+    }
+
+    #[test]
+    fn init_disables_shell_hooks_by_default() {
+        let config = init();
+        assert!(!config.shell_hooks.emit);
+        assert!(!config.shell_hooks.source);
+    }
+
+    #[test]
+    fn parse_config_accepts_shell_hooks() {
+        let content = r#"
+[shell_hooks]
+emit = true
+source = true
+"#;
+        let config = parse_config(content).unwrap();
+        assert!(config.shell_hooks.emit);
+        assert!(config.shell_hooks.source);
     }
 }

@@ -41,4 +41,17 @@ mod tests {
         assert!(generated.contains("\"$schema\""));
         assert!(generated.contains("\"plugins\""));
     }
+
+    #[test]
+    fn checked_in_schema_matches_generated_content() {
+        let output_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config.schema.json");
+        let checked_in = fs::read_to_string(&output_path).expect("read checked-in schema");
+        let generated = pez::schema::generate_config_schema().expect("generate schema");
+        let rendered = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&generated).expect("serialize generated schema")
+        );
+
+        assert_eq!(checked_in, rendered);
+    }
 }

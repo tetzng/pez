@@ -57,6 +57,9 @@ pub(crate) enum Commands {
     /// Output shell activation code
     Activate(ActivateArgs),
 
+    /// Show the effective shell hook configuration
+    HookConfig(HookConfigArgs),
+
     /// Diagnose common setup issues
     Doctor(DoctorArgs),
 
@@ -79,6 +82,14 @@ pub(crate) struct InstallArgs {
     /// Prune uninstalled plugins
     #[arg(short, long, conflicts_with = "plugins")]
     pub(crate) prune: bool,
+
+    /// Enable out-of-process conf.d emit hooks for this command
+    #[arg(long, overrides_with = "no_emit_hooks")]
+    pub(crate) emit_hooks: bool,
+
+    /// Disable out-of-process conf.d emit hooks for this command
+    #[arg(long, overrides_with = "emit_hooks")]
+    pub(crate) no_emit_hooks: bool,
 }
 
 #[derive(Args, Debug)]
@@ -93,12 +104,28 @@ pub(crate) struct UninstallArgs {
     /// Read plugin repos from stdin (one per line)
     #[arg(long)]
     pub(crate) stdin: bool,
+
+    /// Enable out-of-process conf.d emit hooks for this command
+    #[arg(long, overrides_with = "no_emit_hooks")]
+    pub(crate) emit_hooks: bool,
+
+    /// Disable out-of-process conf.d emit hooks for this command
+    #[arg(long, overrides_with = "emit_hooks")]
+    pub(crate) no_emit_hooks: bool,
 }
 
 #[derive(Args, Debug)]
 pub(crate) struct UpgradeArgs {
     /// Repo in the format `owner/repo` or `host/owner/repo`
     pub(crate) plugins: Option<Vec<crate::models::PluginRepo>>,
+
+    /// Enable out-of-process conf.d emit hooks for this command
+    #[arg(long, overrides_with = "no_emit_hooks")]
+    pub(crate) emit_hooks: bool,
+
+    /// Disable out-of-process conf.d emit hooks for this command
+    #[arg(long, overrides_with = "emit_hooks")]
+    pub(crate) no_emit_hooks: bool,
 }
 
 #[derive(Args, Debug)]
@@ -206,6 +233,22 @@ pub(crate) struct ActivateArgs {
     /// Target shell for activation code
     #[arg(value_enum)]
     pub(crate) shell: ShellType,
+
+    /// Enable conf.d emit hooks inside the activation wrapper
+    #[arg(long, overrides_with = "no_emit_hooks")]
+    pub(crate) emit_hooks: bool,
+
+    /// Disable conf.d emit hooks inside the activation wrapper
+    #[arg(long, overrides_with = "emit_hooks")]
+    pub(crate) no_emit_hooks: bool,
+
+    /// Enable conf.d sourcing inside the activation wrapper
+    #[arg(long, overrides_with = "no_source_hooks")]
+    pub(crate) source_hooks: bool,
+
+    /// Disable conf.d sourcing inside the activation wrapper
+    #[arg(long, overrides_with = "source_hooks")]
+    pub(crate) no_source_hooks: bool,
 }
 
 #[derive(Args, Debug)]
@@ -218,6 +261,51 @@ pub(crate) struct DoctorArgs {
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub(crate) enum DoctorFormat {
     Json,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum HookConfigFormat {
+    Json,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum HookConfigFrom {
+    Install,
+    Update,
+    Upgrade,
+    Uninstall,
+    Remove,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(crate) struct HookConfigArgs {
+    /// Output format
+    #[arg(long, value_enum, default_value = "json")]
+    pub(crate) format: HookConfigFormat,
+
+    /// Enable conf.d emit hooks for this query
+    #[arg(long, overrides_with = "no_emit_hooks")]
+    pub(crate) emit_hooks: bool,
+
+    /// Disable conf.d emit hooks for this query
+    #[arg(long, overrides_with = "emit_hooks")]
+    pub(crate) no_emit_hooks: bool,
+
+    /// Enable conf.d sourcing for this query
+    #[arg(long, overrides_with = "no_source_hooks")]
+    pub(crate) source_hooks: bool,
+
+    /// Disable conf.d sourcing for this query
+    #[arg(long, overrides_with = "source_hooks")]
+    pub(crate) no_source_hooks: bool,
+
+    /// Derive subcommand-specific overrides by parsing argv for a subcommand
+    #[arg(long, value_enum)]
+    pub(crate) from: Option<HookConfigFrom>,
+
+    /// Arguments intended for the subcommand when using --from
+    #[arg(last = true)]
+    pub(crate) passthrough: Vec<String>,
 }
 
 // Types moved to models.rs: PluginRepo, InstallTarget, ResolvedInstallTarget
@@ -531,6 +619,41 @@ mod tests {
     #[test]
     fn jobs_override_rejects_zero() {
         assert!(Cli::try_parse_from(["pez", "--jobs", "0", "list"]).is_err());
+    }
+
+    #[test]
+    fn parse_install_emit_hook_flags() {
+        let cli = Cli::parse_from(["pez", "install", "--emit-hooks", "o/r"]);
+        match cli.command {
+            Commands::Install(args) => {
+                assert!(args.emit_hooks);
+                assert!(!args.no_emit_hooks);
+            }
+            other => panic!("expected install command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_hook_config_from_install_passthrough() {
+        let cli = Cli::parse_from([
+            "pez",
+            "hook-config",
+            "--from",
+            "install",
+            "--",
+            "--emit-hooks",
+            "o/r",
+        ]);
+        match cli.command {
+            Commands::HookConfig(args) => {
+                assert!(matches!(args.from, Some(HookConfigFrom::Install)));
+                assert_eq!(
+                    args.passthrough,
+                    vec!["--emit-hooks".to_string(), "o/r".to_string()]
+                );
+            }
+            other => panic!("expected hook-config command, got {other:?}"),
+        }
     }
 }
 

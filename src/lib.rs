@@ -67,6 +67,9 @@ pub async fn run() -> anyhow::Result<()> {
         cli::Commands::Doctor(args) => {
             let _ = cmd::doctor::run(args)?;
         }
+        cli::Commands::HookConfig(args) => {
+            let _ = cmd::hook_config::run(args)?;
+        }
         cli::Commands::Migrate(args) => {
             cmd::migrate::run(args).await?;
         }
@@ -75,7 +78,7 @@ pub async fn run() -> anyhow::Result<()> {
         }
         cli::Commands::Activate(args) => match args.shell {
             cli::ShellType::Fish => {
-                let _ = cmd::activate::run_fish();
+                let _ = cmd::activate::run_fish(args);
             }
         },
         cli::Commands::Completions { shell } => match shell {
