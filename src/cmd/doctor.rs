@@ -1,4 +1,4 @@
-use crate::{cli, lock_file::LockFile, models::TargetDir, utils};
+use crate::{cli, config, lock_file::LockFile, models::TargetDir, utils};
 use serde_derive::Serialize;
 use serde_json::json;
 use std::{collections::HashSet, fs, path};
@@ -34,13 +34,17 @@ pub(crate) fn run(args: &cli::DoctorArgs) -> anyhow::Result<Vec<DoctorCheck>> {
 
 fn collect_checks() -> anyhow::Result<Vec<DoctorCheck>> {
     let mut checks: Vec<DoctorCheck> = Vec::new();
+    let mut shell_hooks = config::ShellHooksConfig::default();
 
     match utils::load_config() {
-        Ok((_cfg, path)) => checks.push(DoctorCheck {
-            name: "config",
-            status: "ok",
-            details: format!("found: {}", path.display()),
-        }),
+        Ok((cfg, path)) => {
+            shell_hooks = cfg.shell_hooks;
+            checks.push(DoctorCheck {
+                name: "config",
+                status: "ok",
+                details: format!("found: {}", path.display()),
+            })
+        }
         Err(_) => checks.push(DoctorCheck {
             name: "config",
             status: "warn",
@@ -85,10 +89,10 @@ fn collect_checks() -> anyhow::Result<Vec<DoctorCheck>> {
 
     // Activation is configured in the user's fish config directory, not the install target.
     let fish_runtime_config_dir = utils::load_default_fish_config_dir()?;
-    let activate_check = check_activate_configured(&fish_runtime_config_dir);
+    let activate_check = check_activate_configured(&fish_runtime_config_dir, shell_hooks);
     let activation_enabled = activate_check.status == "ok";
     checks.push(activate_check);
-    checks.push(check_event_hook_readiness(activation_enabled));
+    checks.push(check_event_hook_readiness(activation_enabled, shell_hooks));
     checks.push(check_install_layout(&fish_config_dir));
 
     if let Some(lock_file) = lock {
@@ -155,7 +159,18 @@ fn collect_checks() -> anyhow::Result<Vec<DoctorCheck>> {
     Ok(checks)
 }
 
-fn check_activate_configured(fish_config_dir: &path::Path) -> DoctorCheck {
+fn check_activate_configured(
+    fish_config_dir: &path::Path,
+    shell_hooks: config::ShellHooksConfig,
+) -> DoctorCheck {
+    if !shell_hooks.source {
+        return DoctorCheck {
+            name: "activate_configured",
+            status: "ok",
+            details: "not required; shell_hooks.source is disabled".to_string(),
+        };
+    }
+
     let config_fish_path = fish_config_dir.join("config.fish");
     if !config_fish_path.exists() {
         return DoctorCheck {
@@ -202,20 +217,40 @@ fn has_activate_fish_line(contents: &str) -> bool {
     })
 }
 
-fn check_event_hook_readiness(activation_enabled: bool) -> DoctorCheck {
-    if activation_enabled {
+fn check_event_hook_readiness(
+    activation_enabled: bool,
+    shell_hooks: config::ShellHooksConfig,
+) -> DoctorCheck {
+    if !shell_hooks.emit && !shell_hooks.source {
         return DoctorCheck {
             name: "event_hook_readiness",
             status: "ok",
-            details: "activate wrapper detected; conf.d events should run in the current shell"
-                .to_string(),
+            details: "shell hooks are disabled by config (emit=false, source=false)".to_string(),
         };
+    }
+
+    if shell_hooks.source && !activation_enabled {
+        return DoctorCheck {
+            name: "event_hook_readiness",
+            status: "warn",
+            details:
+                "shell_hooks.source is enabled, but activate wrapper is not detected; run `pez activate fish | source`"
+                    .to_string(),
+        };
+    }
+
+    let mut enabled = Vec::new();
+    if shell_hooks.source {
+        enabled.push("source");
+    }
+    if shell_hooks.emit {
+        enabled.push("emit");
     }
 
     DoctorCheck {
         name: "event_hook_readiness",
-        status: "warn",
-        details: "activate wrapper not detected; run `pez activate fish | source`".to_string(),
+        status: "ok",
+        details: format!("enabled hook actions: {}", enabled.join(", ")),
     }
 }
 
@@ -457,14 +492,14 @@ mod tests {
     }
 
     #[test]
-    fn doctor_warns_when_activate_is_not_configured() {
+    fn doctor_treats_disabled_shell_hooks_as_ok() {
         let mut env = TestEnvironmentSetup::new();
         env.setup_config(config::init());
 
         with_env(&env, || {
             let statuses = status_map(collect_checks().unwrap());
-            assert_eq!(statuses.get("activate_configured"), Some(&"warn"));
-            assert_eq!(statuses.get("event_hook_readiness"), Some(&"warn"));
+            assert_eq!(statuses.get("activate_configured"), Some(&"ok"));
+            assert_eq!(statuses.get("event_hook_readiness"), Some(&"ok"));
             assert_eq!(statuses.get("install_layout"), Some(&"ok"));
         });
     }
@@ -502,6 +537,79 @@ mod tests {
             let statuses = status_map(collect_checks().unwrap());
             assert_eq!(statuses.get("activate_configured"), Some(&"ok"));
             assert_eq!(statuses.get("event_hook_readiness"), Some(&"ok"));
+        });
+    }
+
+    #[test]
+    fn doctor_reports_event_hooks_ready_when_activate_and_shell_hooks_are_enabled() {
+        let mut env = TestEnvironmentSetup::new();
+        env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig {
+                emit: true,
+                source: true,
+            },
+            plugins: None,
+        });
+        std::fs::write(
+            env.fish_config_dir.join("config.fish"),
+            "if status is-interactive\n    pez activate fish | source\nend\n",
+        )
+        .unwrap();
+
+        with_env(&env, || {
+            let statuses = status_map(collect_checks().unwrap());
+            assert_eq!(statuses.get("activate_configured"), Some(&"ok"));
+            assert_eq!(statuses.get("event_hook_readiness"), Some(&"ok"));
+        });
+    }
+
+    #[test]
+    fn doctor_warns_when_source_hooks_are_enabled_without_activate_wrapper() {
+        let mut env = TestEnvironmentSetup::new();
+        env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig {
+                emit: false,
+                source: true,
+            },
+            plugins: None,
+        });
+
+        with_env(&env, || {
+            let statuses = status_map(collect_checks().unwrap());
+            assert_eq!(statuses.get("activate_configured"), Some(&"warn"));
+            assert_eq!(statuses.get("event_hook_readiness"), Some(&"warn"));
+        });
+    }
+
+    #[test]
+    fn doctor_reports_emit_only_hooks_as_enabled() {
+        let mut env = TestEnvironmentSetup::new();
+        env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig {
+                emit: true,
+                source: false,
+            },
+            plugins: None,
+        });
+
+        with_env(&env, || {
+            let checks = collect_checks().unwrap();
+            let activate = checks
+                .iter()
+                .find(|check| check.name == "activate_configured")
+                .expect("activate_configured check missing");
+            assert_eq!(activate.status, "ok");
+            assert_eq!(
+                activate.details,
+                "not required; shell_hooks.source is disabled"
+            );
+
+            let event = checks
+                .iter()
+                .find(|check| check.name == "event_hook_readiness")
+                .expect("event_hook_readiness check missing");
+            assert_eq!(event.status, "ok");
+            assert_eq!(event.details, "enabled hook actions: emit");
         });
     }
 

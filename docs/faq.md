@@ -26,7 +26,34 @@ Use `pez files owner/repo` for a single plugin or `pez files --all` for everythi
 
 ### How do I run conf.d hooks in my current shell?
 
-Source the activation script: `pez activate fish | source`. For persistence, place it in `~/.config/fish/config.fish` inside `if status is-interactive ... end`. This wraps `pez` so `install`/`upgrade`/`uninstall` source the affected conf.d files and emit events in the current shell.
+Enable hooks in `pez.toml`, then source the activation script:
+
+```toml
+[shell_hooks]
+emit = true
+source = true
+```
+
+```fish
+pez activate fish | source
+```
+
+For persistence, place it in `~/.config/fish/config.fish` inside
+`if status is-interactive ... end`. The wrapper reads `pez.toml` at runtime, so
+changing `shell_hooks` takes effect without regenerating it.
+
+### Can I disable hook execution?
+
+Yes. The default is already:
+
+```toml
+[shell_hooks]
+emit = false
+source = false
+```
+
+You can also temporarily override emit behavior per command with
+`--emit-hooks` or `--no-emit-hooks`.
 
 ### How do I uninstall everything not in pez.toml?
 
