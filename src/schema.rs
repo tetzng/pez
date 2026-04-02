@@ -181,7 +181,7 @@ mod tests {
             Some("pez config")
         );
         assert!(schema.get("properties").is_some());
-        assert!(schema.get("$defs").is_none());
         assert!(schema.pointer("/definitions/PluginSpec").is_none());
+        assert!(schema.pointer("/$defs/PluginSpec").is_none());
     }
 }
