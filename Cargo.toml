@@ -22,7 +22,7 @@ toml = "1.1.0"
 clap_complete = "4.6.0"
 regex = "1.12.3"
 futures = "0.3.32"
-tokio = { version = "1.50.0", features = ["macros", "rt", "rt-multi-thread", "sync"] }
+tokio = { version = "1.51.0", features = ["macros", "rt", "rt-multi-thread", "sync"] }
 anyhow = "1.0.102"
 tempfile = "3.27.0"
 tracing = "0.1.44"
