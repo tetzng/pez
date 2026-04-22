@@ -4,11 +4,27 @@ updates:
     directory: "/"
     schedule:
       interval: daily
+    cooldown:
+      default-days: 7
+    groups:
+      cargo-non-major:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: daily
+    cooldown:
+      default-days: 7
     groups:
-      github-actions:
+      github-actions-non-major:
+        applies-to: version-updates
         patterns:
           - "*"
+        update-types:
+          - minor
+          - patch
