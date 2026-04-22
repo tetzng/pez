@@ -67,7 +67,7 @@ async fn upgrade_all() -> anyhow::Result<()> {
             .filter_map(|p| p.get_plugin_repo().ok())
             .collect();
         let jobs = utils::load_jobs().max(1);
-        let tasks = stream::iter(repos.into_iter())
+        let tasks = stream::iter(repos)
             .map(|repo| {
                 tokio::task::spawn_blocking(move || {
                     info!("{}Upgrading plugin: {}", Emoji("✨ ", ""), &repo);
