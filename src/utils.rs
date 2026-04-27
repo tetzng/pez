@@ -106,6 +106,44 @@ pub(crate) fn clear_cli_jobs_override_for_tests() {
     *cli_jobs_override().lock().unwrap() = None;
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShellHooksOverride {
+    pub emit: Option<bool>,
+    pub source: Option<bool>,
+}
+
+pub(crate) fn resolve_bool_override(enabled: bool, disabled: bool) -> Option<bool> {
+    match (enabled, disabled) {
+        (true, false) => Some(true),
+        (false, true) => Some(false),
+        _ => None,
+    }
+}
+
+pub(crate) fn shell_hooks_override(emit: Option<bool>, source: Option<bool>) -> ShellHooksOverride {
+    ShellHooksOverride { emit, source }
+}
+
+pub(crate) fn load_shell_hooks_config() -> anyhow::Result<config::ShellHooksConfig> {
+    match load_config() {
+        Ok((config, _)) => Ok(config.shell_hooks),
+        Err(_) => Ok(config::init().shell_hooks),
+    }
+}
+
+pub(crate) fn resolve_shell_hooks_with_override(
+    override_value: ShellHooksOverride,
+) -> anyhow::Result<config::ShellHooksConfig> {
+    let mut shell_hooks = load_shell_hooks_config()?;
+    if let Some(value) = override_value.emit {
+        shell_hooks.emit = value;
+    }
+    if let Some(value) = override_value.source {
+        shell_hooks.source = value;
+    }
+    Ok(shell_hooks)
+}
+
 pub(crate) fn load_config() -> anyhow::Result<(config::Config, path::PathBuf)> {
     let config_path = load_pez_config_dir()?.join("pez.toml");
 
@@ -333,10 +371,21 @@ impl fmt::Display for Event {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn emit_event(file_name_or_path: &str, event: &Event) -> anyhow::Result<()> {
-    // Allow callers (e.g., fish wrapper) to suppress out-of-process emits to
-    // avoid duplicate hooks when the shell itself handles events in-process.
-    if std::env::var_os("PEZ_SUPPRESS_EMIT").is_some() {
+    emit_event_with_override(file_name_or_path, event, ShellHooksOverride::default())
+}
+
+pub(crate) fn emit_event_with_override(
+    file_name_or_path: &str,
+    event: &Event,
+    override_value: ShellHooksOverride,
+) -> anyhow::Result<()> {
+    let mut shell_hooks = resolve_shell_hooks_with_override(override_value)?;
+    if env::var_os("PEZ_SUPPRESS_EMIT").is_some() {
+        shell_hooks.emit = false;
+    }
+    if !shell_hooks.emit {
         return Ok(());
     }
 
@@ -1215,9 +1264,22 @@ mod tests {
     #[test]
     fn emit_event_warns_when_stem_missing() {
         let _lock = env_lock().lock().unwrap();
-        let _guard = EnvGuard::capture(&["PEZ_SUPPRESS_EMIT"]);
+        let _guard = EnvGuard::capture(&["PEZ_SUPPRESS_EMIT", "PEZ_CONFIG_DIR"]);
+        let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        config::Config {
+            shell_hooks: config::ShellHooksConfig {
+                emit: true,
+                source: false,
+            },
+            plugins: None,
+        }
+        .save(&config_dir.join("pez.toml"))
+        .unwrap();
         unsafe {
             std::env::remove_var("PEZ_SUPPRESS_EMIT");
+            std::env::set_var("PEZ_CONFIG_DIR", &config_dir);
         }
 
         let (logs, result) = capture_logs(|| emit_event("", &Event::Install));
@@ -1298,9 +1360,20 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let _lock = env_lock().lock().unwrap();
-        let _guard = EnvGuard::capture(&["PEZ_SUPPRESS_EMIT", "PATH"]);
+        let _guard = EnvGuard::capture(&["PEZ_SUPPRESS_EMIT", "PATH", "PEZ_CONFIG_DIR"]);
 
         let temp = tempfile::tempdir().unwrap();
+        let config_dir = temp.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        config::Config {
+            shell_hooks: config::ShellHooksConfig {
+                emit: true,
+                source: false,
+            },
+            plugins: None,
+        }
+        .save(&config_dir.join("pez.toml"))
+        .unwrap();
         let fish_path = temp.path().join("fish");
         std::fs::write(&fish_path, "#!/bin/sh\nexit 1\n").unwrap();
         let mut perms = std::fs::metadata(&fish_path).unwrap().permissions();
@@ -1313,6 +1386,7 @@ mod tests {
         unsafe {
             std::env::remove_var("PEZ_SUPPRESS_EMIT");
             std::env::set_var("PATH", new_path);
+            std::env::set_var("PEZ_CONFIG_DIR", &config_dir);
         }
 
         let (logs, result) = capture_logs(|| emit_event("plugin.fish", &Event::Install));

@@ -572,6 +572,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
@@ -611,6 +612,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
@@ -650,6 +652,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
@@ -680,7 +683,10 @@ mod tests {
     fn test_prune_empty_config_without_yes_and_confirm_removal_true() {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
-        test_env.setup_config(config::Config { plugins: None });
+        test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
+            plugins: None,
+        });
         test_env.setup_lock_file(LockFile {
             version: 1,
             plugins: vec![test_data.unused_plugin],
@@ -704,7 +710,10 @@ mod tests {
     fn test_prune_empty_config_without_yes_and_confirm_removal_false() {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
-        test_env.setup_config(config::Config { plugins: None });
+        test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
+            plugins: None,
+        });
         test_env.setup_lock_file(LockFile {
             version: 1,
             plugins: vec![test_data.unused_plugin],
@@ -733,7 +742,10 @@ mod tests {
     fn test_prune_empty_config_with_yes() {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
-        test_env.setup_config(config::Config { plugins: None });
+        test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
+            plugins: None,
+        });
         test_env.setup_lock_file(LockFile {
             version: 1,
             plugins: vec![test_data.unused_plugin],
@@ -758,6 +770,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
@@ -792,6 +805,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
@@ -819,6 +833,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
@@ -854,6 +869,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
@@ -883,7 +899,10 @@ mod tests {
     async fn prune_parallel_aborts_without_yes_when_confirm_false() {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
-        test_env.setup_config(config::Config { plugins: None });
+        test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
+            plugins: None,
+        });
         test_env.setup_lock_file(LockFile {
             version: 1,
             plugins: vec![test_data.unused_plugin],
@@ -899,7 +918,10 @@ mod tests {
         let _jobs = JobsGuard::set(1);
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
-        test_env.setup_config(config::Config { plugins: None });
+        test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
+            plugins: None,
+        });
         test_env.setup_lock_file(LockFile {
             version: 1,
             plugins: vec![test_data.unused_plugin],
@@ -925,6 +947,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
@@ -953,6 +976,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
@@ -988,6 +1012,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
@@ -1028,6 +1053,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
@@ -1050,6 +1076,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.used_plugin_spec]),
         });
         test_env.setup_lock_file(LockFile {
