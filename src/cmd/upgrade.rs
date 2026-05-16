@@ -13,6 +13,7 @@ use tracing::{error, info, warn};
 
 pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
     info!("{}Starting upgrade process...", Emoji("🔍 ", ""));
+    let emit_override = utils::resolve_bool_override(args.emit_hooks, args.no_emit_hooks);
     if let Some(plugins) = &args.plugins {
         let jobs = utils::load_jobs().max(1);
         let tasks = stream::iter(plugins.iter())
@@ -20,7 +21,7 @@ pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
                 let plugin = plugin.clone();
                 tokio::task::spawn_blocking(move || {
                     info!("{}Upgrading plugin: {}", Emoji("✨ ", ""), &plugin);
-                    let res = upgrade(&plugin);
+                    let res = upgrade(&plugin, emit_override);
                     if res.is_ok() {
                         info!(
                             "{}Successfully upgraded plugin: {}",
@@ -37,7 +38,7 @@ pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
             r??;
         }
     } else {
-        upgrade_all().await?;
+        upgrade_all(emit_override).await?;
     }
     info!(
         "{}All specified plugins have been upgraded successfully!",
@@ -47,19 +48,19 @@ pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn upgrade(plugin: &PluginRepo) -> anyhow::Result<()> {
+fn upgrade(plugin: &PluginRepo, emit_override: Option<bool>) -> anyhow::Result<()> {
     let (mut config, config_path) = utils::load_or_create_config()?;
 
     if config.ensure_plugin_for_repo(plugin) {
         config.save(&config_path)?;
     }
 
-    upgrade_plugin(plugin)?;
+    upgrade_plugin_with_override(plugin, emit_override)?;
 
     Ok(())
 }
 
-async fn upgrade_all() -> anyhow::Result<()> {
+async fn upgrade_all_with_override(emit_override: Option<bool>) -> anyhow::Result<()> {
     let (config, _) = utils::load_or_create_config()?;
     if let Some(plugins) = &config.plugins {
         let repos: Vec<PluginRepo> = plugins
@@ -71,7 +72,7 @@ async fn upgrade_all() -> anyhow::Result<()> {
             .map(|repo| {
                 tokio::task::spawn_blocking(move || {
                     info!("{}Upgrading plugin: {}", Emoji("✨ ", ""), &repo);
-                    upgrade_plugin(&repo)
+                    upgrade_plugin_with_override(&repo, emit_override)
                 })
             })
             .buffer_unordered(jobs);
@@ -84,7 +85,19 @@ async fn upgrade_all() -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn upgrade_all(emit_override: Option<bool>) -> anyhow::Result<()> {
+    upgrade_all_with_override(emit_override).await
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
+    upgrade_plugin_with_override(plugin_repo, None)
+}
+
+fn upgrade_plugin_with_override(
+    plugin_repo: &PluginRepo,
+    emit_override: Option<bool>,
+) -> anyhow::Result<()> {
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
     let (config, _) = utils::load_or_create_config()?;
     let config_dir = utils::load_fish_config_dir()?;
@@ -161,7 +174,11 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                     .iter()
                     .filter(|f| f.dir == TargetDir::ConfD)
                     .for_each(|f| {
-                        if let Err(e) = utils::emit_event(&f.name, &utils::Event::Update) {
+                        if let Err(e) = utils::emit_event_with_override(
+                            &f.name,
+                            &utils::Event::Update,
+                            utils::shell_hooks_override(emit_override, None),
+                        ) {
                             error!("Failed to emit event for {}: {:?}", &f.name, e);
                         }
                     });
@@ -381,6 +398,7 @@ mod tests {
 
             let config = if include_in_config {
                 config::Config {
+                    shell_hooks: config::ShellHooksConfig::default(),
                     plugins: Some(vec![config::PluginSpec {
                         name: None,
                         source: config::PluginSource::Repo {
@@ -393,7 +411,10 @@ mod tests {
                     }]),
                 }
             } else {
-                config::Config { plugins: None }
+                config::Config {
+                    shell_hooks: config::ShellHooksConfig::default(),
+                    plugins: None,
+                }
             };
             env.setup_config(config);
 
@@ -497,6 +518,7 @@ mod tests {
             }],
         });
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![config::PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {
@@ -560,6 +582,7 @@ mod tests {
         }
 
         fixture.env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![config::PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {
@@ -659,6 +682,8 @@ mod tests {
 
         let args = UpgradeArgs {
             plugins: Some(vec![fixture.repo.clone()]),
+            emit_hooks: true,
+            no_emit_hooks: false,
         };
         run(&args).await.expect("run should succeed");
 
@@ -677,6 +702,56 @@ mod tests {
         let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
         assert!(log_contents.contains("emit alpha_update"));
         assert!(!log_contents.contains("emit beta_update"));
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_upgrades_selected_plugins_do_not_emit_by_default() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        crate::utils::clear_cli_jobs_override_for_tests();
+        let fixture = UpgradeFixture::new(false);
+        let _override = EnvOverride::new(&[
+            "PATH",
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_JOBS",
+        ]);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let bin_dir = temp_dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let log_path = temp_dir.path().join("fish.log");
+        let fish_path = bin_dir.join("fish");
+        let script = format!("#!/bin/sh\n\necho \"$@\" >> \"{}\"\n", log_path.display());
+        std::fs::write(&fish_path, script).unwrap();
+        let mut perms = std::fs::metadata(&fish_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fish_path, perms).unwrap();
+
+        let existing_path = std::env::var("PATH").unwrap_or_default();
+        unsafe {
+            std::env::set_var("PATH", format!("{}:{}", bin_dir.display(), existing_path));
+            std::env::remove_var("PEZ_SUPPRESS_EMIT");
+            std::env::set_var("__fish_config_dir", &fixture.env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &fixture.env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &fixture.env.data_dir);
+            std::env::set_var("PEZ_JOBS", "1");
+        }
+
+        let args = UpgradeArgs {
+            plugins: Some(vec![fixture.repo.clone()]),
+            emit_hooks: false,
+            no_emit_hooks: false,
+        };
+        run(&args).await.expect("run should succeed");
+
+        let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(
+            log_contents.is_empty(),
+            "expected no emit, got: {log_contents}"
+        );
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -700,7 +775,11 @@ mod tests {
             std::env::set_var("PEZ_JOBS", "1");
         }
 
-        let args = UpgradeArgs { plugins: None };
+        let args = UpgradeArgs {
+            plugins: None,
+            emit_hooks: false,
+            no_emit_hooks: false,
+        };
         run(&args).await.expect("run should succeed");
 
         let lock = lock_file::load(&fixture.env.lock_file_path).unwrap();

@@ -2,6 +2,7 @@ pub mod activate;
 pub mod completion;
 pub mod doctor;
 pub mod files;
+pub mod hook_config;
 pub mod init;
 pub mod install;
 pub mod list;

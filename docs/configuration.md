@@ -112,22 +112,43 @@ Notes
 - For local sources, `commit_sha = "local"`. Such entries are skipped by
   `upgrade` and excluded from `list --outdated` comparisons.
 
+## Shell Hooks
+
+Use `[shell_hooks]` in `pez.toml` to control optional `conf.d` hook behavior.
+
+```toml
+[shell_hooks]
+emit = false
+source = false
+```
+
+- `emit` controls whether `pez install` / `upgrade` / `uninstall` emit
+  `emit <stem>_{install|update|uninstall}` for `conf.d` files.
+- `source` controls whether the Fish activation wrapper sources matching
+  `conf.d` files in the current shell.
+- Both default to `false`.
+- `pez activate fish | source` reads the current config each time it runs a
+  wrapped command, so changing `pez.toml` takes effect without regenerating the
+  wrapper.
+
 ## Plugin Layout and Copy Rules
 
 - pez looks for top-level `functions`, `completions`, `conf.d`, and `themes` directories in each plugin repo.
 - It copies files recursively into the matching Fish config directories, preserving relative paths.
 - Only `.fish` files are copied from `functions`/`completions`/`conf.d`, and only `.theme` files from `themes`.
 - If two plugins would write the same destination path in a single run, the later plugin is skipped and its files are not recorded in the lockfile.
-- For `conf.d` files, pez emits `emit <stem>_{install|update|uninstall}` after installs/upgrades or before uninstalls (unless `PEZ_SUPPRESS_EMIT` is set).
+- Copying `conf.d` files is separate from hook execution. pez always copies matching files, but only emits `emit <stem>_{install|update|uninstall}` when `shell_hooks.emit` is enabled (or a command-level override is used).
 
 ## Environment Variables and CLI Overrides
 
 - `PEZ_CONFIG_DIR` — Directory containing `pez.toml` and `pez-lock.toml`.
 - `PEZ_DATA_DIR` — Base directory for cloned plugin repositories.
 - `PEZ_TARGET_DIR` — Override the Fish config directory used for copying plugin files. It no longer changes where `pez.toml` or `pez-lock.toml` live.
-- `PEZ_SUPPRESS_EMIT` — When set, suppress `fish -c 'emit ...'` hooks during install/upgrade/uninstall. Used by `pez activate fish` to avoid duplicate events.
+- `PEZ_SUPPRESS_EMIT` — Internal override used by `pez activate fish` to suppress duplicate out-of-process emits while the wrapper handles hooks in-process.
 - `__fish_config_dir` / `XDG_CONFIG_HOME` — Fish configuration directory.
 - `__fish_user_data_dir` / `XDG_DATA_HOME` — Fish data directory.
+- `install` / `upgrade` / `uninstall` support `--emit-hooks` and `--no-emit-hooks` to override `shell_hooks.emit` for a single command.
+- `activate` supports `--emit-hooks`, `--no-emit-hooks`, `--source-hooks`, and `--no-source-hooks` to bake wrapper-local overrides on top of runtime config.
 - `--jobs <N>` — Global CLI flag to override concurrency for `install` (explicit
   targets), `upgrade`, `uninstall`, and `prune`. Must be a positive integer.
 - `PEZ_JOBS` — Environment override for the same concurrency (default: 4). Ignored

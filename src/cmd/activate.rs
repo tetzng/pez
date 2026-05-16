@@ -1,15 +1,35 @@
+use crate::cli::ActivateArgs;
+
 /// Fish activation script emitter.
 ///
 /// Prints Fish wrapper code to stdout. Keep stdout clean of logs so it can be
 /// piped into `source`.
-pub(crate) fn run_fish() -> String {
-    let script = fish_script();
+pub(crate) fn run_fish(args: &ActivateArgs) -> String {
+    let script = fish_script(args);
     print!("{script}");
     script
 }
 
-fn fish_script() -> String {
+fn activation_hook_override_args(args: &ActivateArgs) -> String {
+    let mut flags = Vec::new();
+    if args.emit_hooks {
+        flags.push("--emit-hooks");
+    }
+    if args.no_emit_hooks {
+        flags.push("--no-emit-hooks");
+    }
+    if args.source_hooks {
+        flags.push("--source-hooks");
+    }
+    if args.no_source_hooks {
+        flags.push("--no-source-hooks");
+    }
+    flags.join(" ")
+}
+
+fn fish_script(args: &ActivateArgs) -> String {
     let version = env!("CARGO_PKG_VERSION");
+    let hook_override_args = activation_hook_override_args(args);
     // Guard against multiple sourcing and wrap pez to emit events in-process.
     format!(
         r#"
@@ -53,13 +73,27 @@ if not set -q __pez_activate_version; or test "$__pez_activate_version" != "$__p
     end
 
     function __pez_fish_source_and_emit --description "Source conf.d and emit events" --argument-names phase from
+        set -l __pez_hook_config_args {hook_override_args}
         set -l passthrough $argv[3..-1]
+        set -l hook_config (command pez hook-config --format json --from $from $__pez_hook_config_args -- $passthrough)
+        set -l source_enabled 0
+        set -l emit_enabled 0
+        if string match -rq '.*"source"[[:space:]]*:[[:space:]]*true.*' -- $hook_config
+            set source_enabled 1
+        end
+        if string match -rq '.*"emit"[[:space:]]*:[[:space:]]*true.*' -- $hook_config
+            set emit_enabled 1
+        end
         set -l paths (command pez files --dir conf.d --from $from -- $passthrough | sort)
         for path in $paths
             if test -f "$path"
-                source "$path"
-                set -l name (basename "$path" .fish)
-                emit "$name"_"$phase"
+                if test $source_enabled -eq 1
+                    source "$path"
+                end
+                if test $emit_enabled -eq 1
+                    set -l name (basename "$path" .fish)
+                    emit "$name"_"$phase"
+                end
             end
         end
     end
@@ -111,21 +145,33 @@ end
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::ShellType;
+
+    fn activate_args() -> ActivateArgs {
+        ActivateArgs {
+            shell: ShellType::Fish,
+            emit_hooks: false,
+            no_emit_hooks: false,
+            source_hooks: false,
+            no_source_hooks: false,
+        }
+    }
 
     #[test]
     fn script_contains_guard_and_suppress_flag() {
-        let text = fish_script();
+        let text = fish_script(&activate_args());
         assert!(text.contains("__pez_activate_version"));
         assert!(text.contains("__pez_version"));
         assert!(text.contains(env!("CARGO_PKG_VERSION")));
         assert!(text.contains("PEZ_SUPPRESS_EMIT"));
         assert!(text.contains("command pez files --dir conf.d --from"));
+        assert!(text.contains("command pez hook-config --format json --from"));
         assert!(text.contains("__pez_fish_split_subcmd"));
     }
 
     #[test]
     fn uninstall_emits_before_command() {
-        let text = fish_script();
+        let text = fish_script(&activate_args());
         let parts: Vec<&str> = text.split("case uninstall remove").collect();
         assert!(parts.len() > 1, "uninstall case missing");
         let segment = parts[1];
@@ -144,7 +190,7 @@ mod tests {
     #[test]
     fn targets_not_dropped() {
         // ensure we don't slice away the first target (no custom filter function)
-        let text = fish_script();
+        let text = fish_script(&activate_args());
         assert!(!text.contains("__pez_fish_filter_targets"));
         assert!(text.contains("set -l subargs $parsed[2..-1]"));
         assert!(text.contains("__pez_fish_source_and_emit install install $subargs"));
@@ -153,7 +199,7 @@ mod tests {
 
     #[test]
     fn global_flags_are_skipped() {
-        let text = fish_script();
+        let text = fish_script(&activate_args());
         assert!(text.contains("--jobs"));
         assert!(text.contains("--jobs=*"));
         assert!(text.contains("--verbose"));
@@ -162,7 +208,7 @@ mod tests {
 
     #[test]
     fn uninstall_stdin_is_tapped() {
-        let text = fish_script();
+        let text = fish_script(&activate_args());
         assert!(text.contains("contains -- --stdin $subargs"));
         assert!(text.contains("psub -f -s .pez_uninstall"));
         assert!(text.contains("cat $stdin_file | __pez_fish_source_and_emit uninstall"));
@@ -171,9 +217,30 @@ mod tests {
 
     #[test]
     fn run_fish_returns_script() {
-        let script = run_fish();
-        assert_eq!(script, fish_script());
+        let args = activate_args();
+        let script = run_fish(&args);
+        assert_eq!(script, fish_script(&args));
         assert!(script.contains("__pez_activate_version"));
         assert!(script.contains("function pez --wraps pez"));
+    }
+
+    #[test]
+    fn wrapper_queries_hook_config_at_runtime() {
+        let text = fish_script(&activate_args());
+        assert!(text.contains("set -l hook_config (command pez hook-config --format json --from"));
+        assert!(text.contains("string match -rq '.*\"source\""));
+        assert!(text.contains("string match -rq '.*\"emit\""));
+    }
+
+    #[test]
+    fn script_embeds_activation_hook_overrides() {
+        let text = fish_script(&ActivateArgs {
+            shell: ShellType::Fish,
+            emit_hooks: true,
+            no_emit_hooks: false,
+            source_hooks: false,
+            no_source_hooks: true,
+        });
+        assert!(text.contains("set -l __pez_hook_config_args --emit-hooks --no-source-hooks"));
     }
 }

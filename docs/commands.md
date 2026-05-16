@@ -13,6 +13,7 @@
   - [doctor](#doctor)
   - [completions](#completions)
   - [activate](#activate)
+  - [hook-config](#hook-config)
   - [files](#files)
   - [migrate](#migrate)
 
@@ -44,6 +45,7 @@ Global options (apply to all commands)
 - Options:
   - `--force` Reinstall even if the target already exists.
   - `--prune` (only available when running without explicit targets) removes lockfile entries that are no longer declared in `pez.toml` after a successful install.
+  - `--emit-hooks` / `--no-emit-hooks` override `shell_hooks.emit` for this command.
 - Behavior:
   - CLI‑specified targets are appended to `pez.toml`; relative paths and `~/` are normalized to absolute paths before writing.
   - `owner/repo` resolves to `https://github.com/owner/repo`; `host/...` without a scheme is normalized to `https://host/...`.
@@ -62,6 +64,7 @@ Global options (apply to all commands)
 - Options:
   - `--force` Remove files recorded in the lockfile even if the repository directory is missing.
   - `--stdin` Read `owner/repo` or `host/owner/repo` values from stdin. Blank lines and lines starting with `#` are ignored; the remaining entries are sorted and deduplicated before processing.
+  - `--emit-hooks` / `--no-emit-hooks` override `shell_hooks.emit` for this command.
 - Behavior: removes the cloned repository (if present) and the files recorded in `pez-lock.toml`, then removes the matching entry from `pez.toml` to keep the configuration in sync. Without `--force` when the repo directory is missing, the command prints the target files and exits.
 - Example:
   - `printf "owner/a\nowner/b\n" | pez uninstall --stdin`
@@ -72,6 +75,7 @@ Global options (apply to all commands)
 - Respects selectors in `pez.toml` (`version`/`branch`/`tag`/`commit`). When no selector is set, updates to the latest commit on the remote default branch (remote HEAD).
 - Local path sources (`path`) are skipped.
 - Concurrency is controlled by `--jobs` or `PEZ_JOBS`.
+- `--emit-hooks` / `--no-emit-hooks` override `shell_hooks.emit` for this command.
 - Any repo specified on the CLI that is not already in `pez.toml` is added automatically so future installs remain in sync.
 
 ### list
@@ -97,6 +101,9 @@ Global options (apply to all commands)
 
 - Checks the configuration file, lockfile, data/config directories, and the set of copied files.
 - Reported checks include: `config`, `lock_file`, `fish_config_dir`, `pez_data_dir`, `activate_configured`, `event_hook_readiness`, `install_layout`, `repos` (missing clones), `target_files` (missing files), `duplicates` (conflicting destinations), `theme_assets`.
+- Hook-related behavior:
+  - when both `shell_hooks.emit` and `shell_hooks.source` are disabled, `doctor` reports that shell hooks are intentionally disabled.
+  - when `shell_hooks.source` is enabled but the activate wrapper is not detected, `doctor` warns.
 - Options: `--format json`.
 
 ### completions
@@ -108,8 +115,26 @@ Global options (apply to all commands)
 
 - Output shell activation code that wraps `pez` with hooks in the current shell.
 - Usage: `pez activate fish | source` (for persistence, add inside `if status is-interactive ... end` in `~/.config/fish/config.fish`).
-- Behavior: after `install`/`upgrade`, sources matching `conf.d` files and emits `<stem>_{install|update}` in the current shell; before `uninstall`, emits `<stem>_uninstall`.
+- Options:
+  - `--emit-hooks` / `--no-emit-hooks` override `shell_hooks.emit` inside the wrapper.
+  - `--source-hooks` / `--no-source-hooks` override `shell_hooks.source` inside the wrapper.
+- Behavior:
+  - the wrapper queries `pez hook-config` at runtime, so edits to `pez.toml` are picked up without re-running `pez activate fish | source`.
+  - after `install`/`upgrade`, it can source matching `conf.d` files and emit `<stem>_{install|update}` in the current shell.
+  - before `uninstall`, it can emit `<stem>_uninstall` and optionally source matching files, depending on the resolved hook config.
 - When active, the wrapper runs `pez` with `PEZ_SUPPRESS_EMIT=1` to avoid duplicate out-of-process emits.
+
+### hook-config
+
+- Show the effective shell hook configuration after applying `pez.toml` defaults and optional CLI overrides.
+- Options:
+  - `--format json`
+  - `--emit-hooks` / `--no-emit-hooks`
+  - `--source-hooks` / `--no-source-hooks`
+  - `--from [install|update|upgrade|uninstall|remove]` parses a subcommand argv after `--` and applies any command-specific hook overrides.
+- Examples:
+  - `pez hook-config --format json`
+  - `pez hook-config --from install -- --emit-hooks owner/repo`
 
 ### files
 
@@ -135,4 +160,5 @@ Global options (apply to all commands)
 - `--force` replaces the existing plugin list with the migrated entries instead of merging.
 - `--install` triggers `pez install` for the migrated entries after they are written (skipped when `--dry-run` is set).
 - The command always prints "Next steps" guidance (install/verify/doctor/activate flow) so you can continue migration safely.
+- If you want fisher-like `conf.d` hook behavior during migration, enable `[shell_hooks]` and source `pez activate fish | source` before continuing.
 - Recommended migration flow is documented in [migrate-from-fisher.md](migrate-from-fisher.md).

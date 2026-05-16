@@ -13,7 +13,8 @@ This document outlines the high‑level structure and flows in pez.
   - `git.rs`: resolve selections against a repo (branches/tags/commits), list tags.
   - `utils.rs`: path/env resolution, copy routines, events, helpers.
   - `cmd/*`: end‑user commands orchestrating core modules.
-    - `cmd/activate.rs`: emits Fish wrapper code to run hooks in the current shell.
+    - `cmd/activate.rs`: emits Fish wrapper code that consults runtime hook config.
+    - `cmd/hook_config.rs`: resolves the effective shell hook config for wrappers and diagnostics.
     - `cmd/files.rs`: lists installed file paths from the lockfile (used by activation).
 
 ## Data Flow (install)
@@ -24,7 +25,7 @@ This document outlines the high‑level structure and flows in pez.
 4. Resolve the commit using `resolver::RefKind` -> `git::resolve_selection`.
 5. Copy files to the Fish config directory using `utils::copy_plugin_files*`.
 6. Update the lockfile with `name`/`repo`/`source`/`commit_sha`/`files`.
-7. For files under `conf.d`, emit `fish -c 'emit <stem>_{install|update|uninstall}'` events.
+7. For files under `conf.d`, optionally emit `fish -c 'emit <stem>_{install|update|uninstall}'` when `shell_hooks.emit` (or a command override) is enabled.
 
 ## Concurrency
 

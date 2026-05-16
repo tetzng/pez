@@ -4,41 +4,60 @@ This guide provides a low-risk migration path from `fisher` to `pez`.
 
 ## Recommended path
 
-1. Enable activation in your current shell.
+1. Decide whether you want fisher-like runtime hooks.
+
+By default, pez keeps shell hooks disabled:
+
+```toml
+[shell_hooks]
+emit = false
+source = false
+```
+
+If you want current-shell `conf.d` sourcing and event emission similar to
+fisher, enable them first:
+
+```toml
+[shell_hooks]
+emit = true
+source = true
+```
+
+2. Enable activation in your current shell if you turned on `shell_hooks.source`.
 
 ```fish
 pez activate fish | source
 ```
 
-2. Import `fish_plugins` into `pez.toml`.
+3. Import `fish_plugins` into `pez.toml`.
 
 ```fish
 pez migrate
 ```
 
-3. Install migrated plugins.
+4. Install migrated plugins.
 
 ```fish
 pez install
 ```
 
-4. Verify the result.
+5. Verify the result.
 
 ```fish
 pez list --format table
 pez doctor
 ```
 
-5. Remove or disable fisher after verification.
+6. Remove or disable fisher after verification.
 
 ## Common pitfalls
 
-- `pez activate fish` is not enabled:
-  `install`/`upgrade`/`uninstall` complete, but in-process `conf.d` events are not emitted in the current shell.
+- `pez activate fish` alone does not enable hooks:
+  the wrapper reads `pez.toml` at runtime; if `shell_hooks.emit` / `shell_hooks.source` remain `false`, no current-shell hook actions run.
 - `fisher` itself was removed during migration:
   this is expected; `jorgebucaran/fisher` is skipped by `pez migrate`.
 - `conf.d` behavior differs before activation:
-  without activation wrapper, hooks are emitted out-of-process and may not affect the current interactive shell session.
+  with default settings, pez only copies plugin files. If you enable `shell_hooks.emit` without `shell_hooks.source`, events run out-of-process and may not affect the current interactive shell session.
 
 ## What pez handles (and does not)
 

@@ -24,20 +24,25 @@ pub(crate) async fn run(args: &InstallArgs) -> anyhow::Result<()> {
 }
 
 async fn handle_installation(args: &InstallArgs) -> anyhow::Result<()> {
+    let emit_override = utils::resolve_bool_override(args.emit_hooks, args.no_emit_hooks);
     if let Some(plugins) = &args.plugins {
-        install(plugins, &args.force).await?;
+        install(plugins, &args.force, emit_override).await?;
         info!(
             "\n{}All specified plugins have been installed successfully!",
             Emoji("🎉 ", "")
         );
     } else {
-        install_all(&args.force, &args.prune)?;
+        install_all_with_override(&args.force, &args.prune, emit_override)?;
     }
 
     Ok(())
 }
 
-async fn install(targets: &[InstallTarget], force: &bool) -> anyhow::Result<()> {
+async fn install(
+    targets: &[InstallTarget],
+    force: &bool,
+    emit_override: Option<bool>,
+) -> anyhow::Result<()> {
     let (mut config, config_path) = utils::load_or_create_config()?;
     add_plugins_to_config(&mut config, &config_path, targets)?;
 
@@ -54,7 +59,7 @@ async fn install(targets: &[InstallTarget], force: &bool) -> anyhow::Result<()> 
     let new_plugins = sync_plugin_files(&mut new_plugins, &pez_data_dir).await?;
 
     for plugin in &new_plugins {
-        emit_event(plugin, &utils::Event::Install)?;
+        emit_event(plugin, &utils::Event::Install, emit_override)?;
     }
 
     lock_file.merge_plugins(new_plugins);
@@ -66,13 +71,18 @@ async fn install(targets: &[InstallTarget], force: &bool) -> anyhow::Result<()> 
     Ok(())
 }
 
-fn emit_event(plugin: &Plugin, event: &utils::Event) -> anyhow::Result<()> {
+fn emit_event(
+    plugin: &Plugin,
+    event: &utils::Event,
+    emit_override: Option<bool>,
+) -> anyhow::Result<()> {
+    let hook_override = utils::shell_hooks_override(emit_override, None);
     plugin
         .files
         .iter()
         .filter(|f| f.dir == TargetDir::ConfD)
         .for_each(|f| {
-            let _ = utils::emit_event(&f.name, event);
+            let _ = utils::emit_event_with_override(&f.name, event, hook_override);
         });
 
     Ok(())
@@ -491,11 +501,13 @@ enum InstallOutcome {
     Skipped,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn install_resolved_target(
     plugin_spec: &config::PluginSpec,
     resolved: &ResolvedInstallTarget,
     locked_plugin: Option<&Plugin>,
     force: bool,
+    emit_override: Option<bool>,
     pez_data_dir: &path::Path,
     fish_config_dir: &path::Path,
     dest_paths: &mut HashSet<path::PathBuf>,
@@ -537,11 +549,20 @@ fn install_resolved_target(
         )?;
     }
 
-    emit_event(&plugin, &utils::Event::Install)?;
+    emit_event(&plugin, &utils::Event::Install, emit_override)?;
     Ok(InstallOutcome::Installed(plugin))
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
+    install_all_with_override(force, prune, None)
+}
+
+fn install_all_with_override(
+    force: &bool,
+    prune: &bool,
+    emit_override: Option<bool>,
+) -> anyhow::Result<()> {
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
     let (config, _) = utils::load_config()?;
     let pez_data_dir = utils::load_pez_data_dir()?;
@@ -566,6 +587,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
             &resolved,
             lock_file.get_plugin_by_repo(&repo_for_id),
             *force,
+            emit_override,
             &pez_data_dir,
             &fish_config_dir,
             &mut dest_paths,
@@ -626,7 +648,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     Emoji("🗑️  ", ""),
                 );
 
-                emit_event(&plugin, &utils::Event::Uninstall)?;
+                emit_event(&plugin, &utils::Event::Uninstall, emit_override)?;
 
                 let fish_config_dir = utils::load_fish_config_dir()?;
                 for file in &plugin.files {
@@ -843,7 +865,10 @@ mod tests {
     fn test_add_plugin_in_empty_config() {
         let mut test_env = TestEnvironmentSetup::new();
         let _test_data = TestDataBuilder::new().build();
-        test_env.setup_config(config::Config { plugins: None });
+        test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
+            plugins: None,
+        });
 
         let config = test_env.config.as_mut().expect("Config is not initialized");
         let targets = vec![crate::models::InstallTarget::from_raw("owner/new-repo")];
@@ -865,6 +890,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.added_plugin_spec.clone()]),
         });
 
@@ -890,6 +916,7 @@ mod tests {
         let mut test_env = TestEnvironmentSetup::new();
         let test_data = TestDataBuilder::new().build();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![test_data.added_plugin_spec.clone()]),
         });
 
@@ -980,6 +1007,8 @@ mod tests {
             )]),
             force: false,
             prune: false,
+            emit_hooks: false,
+            no_emit_hooks: false,
         };
 
         tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(run(&args)))
@@ -1038,6 +1067,8 @@ mod tests {
             )]),
             force: false,
             prune: false,
+            emit_hooks: false,
+            no_emit_hooks: false,
         };
 
         let result =
@@ -1305,11 +1336,27 @@ mod tests {
     #[test]
     fn emit_event_only_for_conf_d() {
         let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
-        let _override = EnvOverride::new(&["PATH", "PEZ_SUPPRESS_EMIT", "PEZ_TEST_FISH_LOG"]);
+        let _override = EnvOverride::new(&[
+            "PATH",
+            "PEZ_SUPPRESS_EMIT",
+            "PEZ_TEST_FISH_LOG",
+            "PEZ_CONFIG_DIR",
+        ]);
         let temp_dir = tempfile::tempdir().unwrap();
         let bin_dir = temp_dir.path().join("bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
         let log_path = temp_dir.path().join("fish.log");
+        let config_dir = temp_dir.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        config::Config {
+            shell_hooks: config::ShellHooksConfig {
+                emit: true,
+                source: false,
+            },
+            plugins: None,
+        }
+        .save(&config_dir.join("pez.toml"))
+        .unwrap();
         let fish_path = bin_dir.join("fish");
         let script = format!("#!/bin/sh\n\necho \"$@\" >> \"{}\"\n", log_path.display());
         std::fs::write(&fish_path, script).unwrap();
@@ -1322,6 +1369,7 @@ mod tests {
             std::env::set_var("PATH", format!("{}:{}", bin_dir.display(), existing_path));
             std::env::remove_var("PEZ_SUPPRESS_EMIT");
             std::env::set_var("PEZ_TEST_FISH_LOG", &log_path);
+            std::env::set_var("PEZ_CONFIG_DIR", &config_dir);
         }
 
         let repo = PluginRepo::new(None, "owner".to_string(), "repo".to_string()).unwrap();
@@ -1342,11 +1390,58 @@ mod tests {
             ],
         };
 
-        emit_event(&plugin, &utils::Event::Install).unwrap();
+        emit_event(&plugin, &utils::Event::Install, None).unwrap();
 
         let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
         assert!(log_contents.contains("emit alpha_install"));
         assert!(!log_contents.contains("emit beta_install"));
+    }
+
+    #[test]
+    fn emit_event_is_disabled_by_default() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let _override = EnvOverride::new(&["PATH", "PEZ_SUPPRESS_EMIT", "PEZ_CONFIG_DIR"]);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let bin_dir = temp_dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let log_path = temp_dir.path().join("fish.log");
+        let fish_path = bin_dir.join("fish");
+        let script = format!("#!/bin/sh\n\necho \"$@\" >> \"{}\"\n", log_path.display());
+        std::fs::write(&fish_path, script).unwrap();
+        let mut perms = std::fs::metadata(&fish_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fish_path, perms).unwrap();
+
+        let config_dir = temp_dir.path().join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        config::init().save(&config_dir.join("pez.toml")).unwrap();
+
+        let existing_path = std::env::var("PATH").unwrap_or_default();
+        unsafe {
+            std::env::set_var("PATH", format!("{}:{}", bin_dir.display(), existing_path));
+            std::env::remove_var("PEZ_SUPPRESS_EMIT");
+            std::env::set_var("PEZ_CONFIG_DIR", &config_dir);
+        }
+
+        let repo = PluginRepo::new(None, "owner".to_string(), "repo".to_string()).unwrap();
+        let plugin = Plugin {
+            name: "repo".to_string(),
+            repo,
+            source: "source".to_string(),
+            commit_sha: "sha".to_string(),
+            files: vec![PluginFile {
+                dir: TargetDir::ConfD,
+                name: "alpha.fish".to_string(),
+            }],
+        };
+
+        emit_event(&plugin, &utils::Event::Install, None).unwrap();
+
+        let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(
+            log_contents.is_empty(),
+            "expected no emit, got: {log_contents}"
+        );
     }
 
     #[test]
@@ -1382,6 +1477,7 @@ mod tests {
         };
         let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![plugin_spec]),
         });
         test_env.setup_lock_file(crate::lock_file::LockFile {
@@ -1443,6 +1539,7 @@ mod tests {
         let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
         let repo_path = test_env.data_dir.join(repo_for_id.as_str());
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![plugin_spec]),
         });
         test_env.setup_lock_file(crate::lock_file::LockFile {
@@ -1502,6 +1599,7 @@ mod tests {
         };
         let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![plugin_spec]),
         });
         test_env.setup_lock_file(crate::lock_file::LockFile {
@@ -1564,6 +1662,7 @@ mod tests {
         };
         let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![plugin_spec]),
         });
         test_env.setup_lock_file(crate::lock_file::LockFile {
@@ -1614,6 +1713,7 @@ mod tests {
         };
         let repo_for_id = plugin_spec.get_plugin_repo().unwrap();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![plugin_spec]),
         });
         test_env.setup_lock_file(crate::lock_file::LockFile {
@@ -1656,6 +1756,7 @@ mod tests {
         let repo_keep = PluginRepo::new(None, "owner".to_string(), "keep".to_string()).unwrap();
         let repo_extra = PluginRepo::new(None, "owner".to_string(), "extra".to_string()).unwrap();
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![PluginSpec {
                 name: None,
                 source: PluginSource::Repo {
@@ -1748,6 +1849,7 @@ mod tests {
             },
         };
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![plugin_spec]),
         });
 
@@ -1839,6 +1941,7 @@ mod tests {
             },
         };
         test_env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![plugin_spec]),
         });
 

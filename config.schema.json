@@ -1,6 +1,22 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
+  "definitions": {
+    "ShellHooksConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "emit": {
+          "default": false,
+          "type": "boolean"
+        },
+        "source": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
   "properties": {
     "plugins": {
       "items": {
@@ -140,6 +156,17 @@
         "type": "object"
       },
       "type": "array"
+    },
+    "shell_hooks": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ShellHooksConfig"
+        }
+      ],
+      "default": {
+        "emit": false,
+        "source": false
+      }
     }
   },
   "title": "pez config",

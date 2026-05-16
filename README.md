@@ -20,7 +20,7 @@ state in a lockfile.
 - Lockfile with exact commits and installed file records
 - Duplicate destination detection to avoid overwrites
 - `upgrade`, `prune`, and `doctor` utilities
-- Optional activation wrapper to emit conf.d events in the current shell
+- Optional, runtime-configured shell hooks for `conf.d`
 
 ## Installation
 
@@ -64,7 +64,7 @@ pez list --format table
 # 5) (Optional) Enable completions for pez itself
 pez completions fish > ~/.config/fish/completions/pez.fish
 
-# 6) (Optional) Activate fish shell hooks (emit conf.d events in the current shell)
+# 6) (Optional) Activate the fish shell wrapper
 pez activate fish | source
 ```
 
@@ -79,11 +79,23 @@ Completions are intentionally Fish-only.
 ## Shell Activation
 
 ```fish
-# Enable conf.d events in the current shell for install/upgrade/uninstall
+# Install a wrapper that checks the current hook config at runtime
 pez activate fish | source
 ```
 
 For persistence, add it inside an `if status is-interactive ... end` block in `~/.config/fish/config.fish`.
+
+By default, pez keeps shell hooks disabled:
+
+```toml
+[shell_hooks]
+emit = false
+source = false
+```
+
+Enable `emit` and/or `source` in `pez.toml` when you want fisher-like `conf.d`
+hook behavior. `pez activate fish` reads that config at execution time, so you
+do not need to regenerate the wrapper after editing `pez.toml`.
 
 ## Docs & FAQ
 
@@ -115,7 +127,7 @@ Details: [docs/migrate-from-fisher.md](docs/migrate-from-fisher.md)
 Usage: pez [OPTIONS] <COMMAND>
 
 Commands:
-  init | install | uninstall | upgrade | list | prune | completions | activate | doctor | migrate | files
+  init | install | uninstall | upgrade | list | prune | completions | activate | hook-config | doctor | migrate | files
 
 Options:
   -v, --verbose  Increase output verbosity (-v for info, -vv for debug)
@@ -163,9 +175,12 @@ clones), see [docs/commands.md](docs/commands.md).
 
 ## Security
 
-pez installs plugin files from third-party repositories. If you enable the
-activation wrapper, `conf.d` scripts are sourced in the current shell. pez does
-not verify signatures or sandbox code. Only install plugins you trust.
+pez installs plugin files from third-party repositories. Even with
+`shell_hooks.emit = false` and `shell_hooks.source = false`, copied `conf.d`
+files can still run when Fish later loads them. If you enable the activation
+wrapper with `shell_hooks.source = true`, pez will also source matching `conf.d`
+files in the current shell. pez does not verify signatures or sandbox code.
+Only install plugins you trust.
 
 ## Contributing
 

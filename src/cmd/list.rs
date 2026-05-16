@@ -508,6 +508,7 @@ mod tests {
         };
         let repo_str = repo.as_str();
         let config = config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {
@@ -629,6 +630,7 @@ mod tests {
             ],
         });
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {
@@ -832,6 +834,7 @@ mod tests {
         let remote = clone_into_data_dir(&origin_path, &env, &repo);
 
         let config = config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {
@@ -873,6 +876,7 @@ mod tests {
         let remote = clone_into_data_dir(&origin_path, &env, &repo);
 
         let config = config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {
@@ -915,6 +919,7 @@ mod tests {
         let remote = clone_into_data_dir(&origin_path, &env, &repo);
 
         let config = config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {
@@ -959,6 +964,7 @@ mod tests {
         let remote = clone_into_data_dir(&origin_path, &env, &repo);
 
         let config = config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {
@@ -1007,6 +1013,7 @@ mod tests {
         let remote = clone_into_data_dir(&origin_path, &env, &repo);
 
         let config = config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {
@@ -1055,6 +1062,7 @@ mod tests {
         let remote = clone_into_data_dir(&origin_path, &env, &repo);
 
         let config = config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {
@@ -1101,6 +1109,7 @@ mod tests {
         let remote = clone_into_data_dir(&origin_path, &env, &repo);
 
         let config = config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {

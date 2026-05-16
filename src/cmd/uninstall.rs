@@ -7,6 +7,7 @@ use tracing::{error, info, warn};
 
 pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
     info!("{}Starting uninstallation process...", Emoji("🔍 ", ""));
+    let emit_override = utils::resolve_bool_override(args.emit_hooks, args.no_emit_hooks);
     let jobs = utils::load_jobs().max(1);
     let mut plugins: Vec<PluginRepo> = args.plugins.clone().unwrap_or_default();
     if plugins.is_empty() && args.stdin {
@@ -23,7 +24,7 @@ pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
             let force = args.force;
             tokio::task::spawn_blocking(move || {
                 info!("\n{}Uninstalling plugin: {}", Emoji("✨ ", ""), plugin);
-                uninstall(&plugin, force)
+                uninstall_with_override(&plugin, force, emit_override)
             })
         })
         .buffer_unordered(jobs);
@@ -77,7 +78,16 @@ fn read_plugins_from_stdin() -> anyhow::Result<Vec<PluginRepo>> {
     read_plugins_from_reader(handle)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result<()> {
+    uninstall_with_override(plugin_repo, force, None)
+}
+
+fn uninstall_with_override(
+    plugin_repo: &PluginRepo,
+    force: bool,
+    emit_override: Option<bool>,
+) -> anyhow::Result<()> {
     let plugin_repo_str = plugin_repo.as_str();
     let config_dir = utils::load_fish_config_dir()?;
 
@@ -92,7 +102,11 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 .iter()
                 .filter(|f| f.dir == TargetDir::ConfD)
                 .for_each(|f| {
-                    let _ = utils::emit_event(&f.name, &utils::Event::Uninstall);
+                    let _ = utils::emit_event_with_override(
+                        &f.name,
+                        &utils::Event::Uninstall,
+                        utils::shell_hooks_override(emit_override, None),
+                    );
                 });
 
             if repo_path.exists() {
@@ -312,6 +326,10 @@ owner/plugin-a
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig {
+                emit: true,
+                source: false,
+            },
             plugins: Some(vec![spec]),
         });
 
@@ -414,6 +432,10 @@ owner/plugin-a
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig {
+                emit: true,
+                source: false,
+            },
             plugins: Some(vec![spec]),
         });
         env.setup_data_repo(vec![repo.clone()]);
@@ -488,6 +510,7 @@ owner/plugin-a
             repo: "missing".into(),
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![config::PluginSpec {
                 name: None,
                 source: config::PluginSource::Repo {
@@ -595,6 +618,10 @@ owner/plugin-a
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig {
+                emit: true,
+                source: false,
+            },
             plugins: Some(vec![spec]),
         });
         env.setup_data_repo(vec![repo.clone()]);
@@ -633,6 +660,88 @@ owner/plugin-a
         assert!(!log_contents.contains("emit beta_uninstall"));
     }
 
+    #[test]
+    fn uninstall_does_not_emit_by_default() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PATH",
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+        ]);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let bin_dir = temp_dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let log_path = temp_dir.path().join("fish.log");
+        let fish_path = bin_dir.join("fish");
+        let script = format!("#!/bin/sh\n\necho \"$@\" >> \"{}\"\n", log_path.display());
+        std::fs::write(&fish_path, script).unwrap();
+        let mut perms = std::fs::metadata(&fish_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fish_path, perms).unwrap();
+
+        let existing_path = std::env::var("PATH").unwrap_or_default();
+        unsafe {
+            std::env::set_var("PATH", format!("{}:{}", bin_dir.display(), existing_path));
+            std::env::remove_var("PEZ_SUPPRESS_EMIT");
+            std::env::set_var("__fish_config_dir", &env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
+        }
+
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".into(),
+            repo: "emit".into(),
+        };
+        let spec = config::PluginSpec {
+            name: None,
+            source: config::PluginSource::Repo {
+                repo: repo.clone(),
+                version: None,
+                branch: None,
+                tag: None,
+                commit: None,
+            },
+        };
+        env.setup_config(config::init());
+        if let Some(config) = env.config.clone() {
+            let mut updated = config;
+            updated.plugins = Some(vec![spec]);
+            env.setup_config(updated);
+        }
+        env.setup_data_repo(vec![repo.clone()]);
+
+        let conf_dir = env.fish_config_dir.join(TargetDir::ConfD.as_str());
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        std::fs::File::create(conf_dir.join("alpha.fish")).unwrap();
+
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![crate::lock_file::Plugin {
+                name: "emit".into(),
+                repo: repo.clone(),
+                source: repo.default_remote_source(),
+                commit_sha: "abc1234".into(),
+                files: vec![PluginFile {
+                    dir: TargetDir::ConfD,
+                    name: "alpha.fish".into(),
+                }],
+            }],
+        });
+
+        uninstall(&repo, true).expect("uninstall should succeed");
+
+        let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(
+            log_contents.is_empty(),
+            "expected no emit, got: {log_contents}"
+        );
+    }
+
     #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "multi_thread")]
     async fn run_bails_without_plugins_or_stdin() {
@@ -643,6 +752,8 @@ owner/plugin-a
             plugins: None,
             force: false,
             stdin: false,
+            emit_hooks: false,
+            no_emit_hooks: false,
         };
         let err = run(&args).await.expect_err("expected failure");
         assert!(
@@ -686,6 +797,7 @@ owner/plugin-a
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![spec]),
         });
         env.setup_data_repo(vec![repo.clone()]);
@@ -714,6 +826,8 @@ owner/plugin-a
             plugins: None,
             force: true,
             stdin: true,
+            emit_hooks: false,
+            no_emit_hooks: false,
         };
         run(&args).await.expect("run should succeed");
 
@@ -757,6 +871,7 @@ owner/plugin-a
             },
         };
         env.setup_config(config::Config {
+            shell_hooks: config::ShellHooksConfig::default(),
             plugins: Some(vec![spec]),
         });
         env.setup_data_repo(vec![repo.clone()]);
@@ -784,6 +899,8 @@ owner/plugin-a
             plugins: Some(vec![repo.clone()]),
             force: true,
             stdin: false,
+            emit_hooks: false,
+            no_emit_hooks: false,
         };
         run(&args).await.expect("run should succeed");
 
