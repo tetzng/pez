@@ -1345,8 +1345,8 @@ mod tests {
         emit_event(&plugin, &utils::Event::Install).unwrap();
 
         let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
-        assert!(log_contents.contains("emit alpha_install"));
-        assert!(!log_contents.contains("emit beta_install"));
+        assert!(log_contents.contains("alpha_install"));
+        assert!(!log_contents.contains("beta_install"));
     }
 
     #[test]

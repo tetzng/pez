@@ -345,13 +345,20 @@ pub(crate) fn emit_event(file_name_or_path: &str, event: &Event) -> anyhow::Resu
         .and_then(|s| s.to_str());
     match stem_opt {
         Some(stem) => {
+            if !is_safe_event_stem(stem) {
+                warn!("Skipping unsafe event name stem: {:?}", stem);
+                return Ok(());
+            }
+            let event_name = format!("{stem}_{event}");
             let output = std::process::Command::new("fish")
                 .arg("-c")
-                .arg(format!("emit {stem}_{event}"))
+                .arg(r#"emit -- "$argv[1]""#)
+                .arg("--")
+                .arg(&event_name)
                 .spawn()
                 .context("Failed to spawn fish to emit event")?
                 .wait_with_output()?;
-            debug!("Emitted event: {}_{}", stem, event);
+            debug!("Emitted event: {}", event_name);
 
             if !output.status.success() {
                 error!("Command executed with failing error code");
@@ -366,6 +373,13 @@ pub(crate) fn emit_event(file_name_or_path: &str, event: &Event) -> anyhow::Resu
     }
 
     Ok(())
+}
+
+fn is_safe_event_stem(stem: &str) -> bool {
+    !stem.is_empty()
+        && stem
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
 
 fn warn_no_plugin_files() {
@@ -1225,6 +1239,82 @@ mod tests {
         assert!(
             logs.iter()
                 .any(|msg| msg.contains("Could not extract plugin name"))
+        );
+    }
+
+    #[cfg(unix)]
+    fn install_fake_fish(temp: &tempfile::TempDir, script: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fish_path = temp.path().join("fish");
+        std::fs::write(&fish_path, script).unwrap();
+        let mut perms = std::fs::metadata(&fish_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fish_path, perms).unwrap();
+        fish_path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn emit_event_passes_event_name_as_fish_argv() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["PEZ_SUPPRESS_EMIT", "PATH"]);
+
+        let temp = tempfile::tempdir().unwrap();
+        let log_path = temp.path().join("fish-args.log");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{}\"\n",
+            log_path.display()
+        );
+        install_fake_fish(&temp, &script);
+
+        let old_path = std::env::var_os("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", temp.path().display(), old_path.to_string_lossy());
+
+        unsafe {
+            std::env::remove_var("PEZ_SUPPRESS_EMIT");
+            std::env::set_var("PATH", new_path);
+        }
+
+        emit_event("safe-plugin.fish", &Event::Install).unwrap();
+
+        let args = std::fs::read_to_string(log_path).unwrap();
+        let args: Vec<&str> = args.lines().collect();
+        assert_eq!(
+            args,
+            vec!["-c", r#"emit -- "$argv[1]""#, "--", "safe-plugin_install"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn emit_event_skips_unsafe_stem_without_spawning_fish() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::capture(&["PEZ_SUPPRESS_EMIT", "PATH"]);
+
+        let temp = tempfile::tempdir().unwrap();
+        let log_path = temp.path().join("fish-invoked.log");
+        let script = format!(
+            "#!/bin/sh\necho invoked > \"{}\"\nexit 7\n",
+            log_path.display()
+        );
+        install_fake_fish(&temp, &script);
+
+        let old_path = std::env::var_os("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", temp.path().display(), old_path.to_string_lossy());
+
+        unsafe {
+            std::env::remove_var("PEZ_SUPPRESS_EMIT");
+            std::env::set_var("PATH", new_path);
+        }
+
+        let (logs, result) = capture_logs(|| emit_event("bad;touch owned.fish", &Event::Install));
+
+        assert!(result.is_ok());
+        assert!(!log_path.exists());
+        assert!(
+            logs.iter()
+                .any(|msg| msg.contains("unsafe event name stem"))
         );
     }
 

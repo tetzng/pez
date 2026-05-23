@@ -118,14 +118,14 @@ Notes
 - It copies files recursively into the matching Fish config directories, preserving relative paths.
 - Only `.fish` files are copied from `functions`/`completions`/`conf.d`, and only `.theme` files from `themes`.
 - If two plugins would write the same destination path in a single run, the later plugin is skipped and its files are not recorded in the lockfile.
-- For `conf.d` files, pez emits `emit <stem>_{install|update|uninstall}` after installs/upgrades or before uninstalls (unless `PEZ_SUPPRESS_EMIT` is set).
+- For `conf.d` files with safe stems (`A-Z`, `a-z`, `0-9`, `_`, `-`, or `.`), pez emits `<stem>_{install|update|uninstall}` after installs/upgrades or before uninstalls (unless `PEZ_SUPPRESS_EMIT` is set).
 
 ## Environment Variables and CLI Overrides
 
 - `PEZ_CONFIG_DIR` — Directory containing `pez.toml` and `pez-lock.toml`.
 - `PEZ_DATA_DIR` — Base directory for cloned plugin repositories.
 - `PEZ_TARGET_DIR` — Override the Fish config directory used for copying plugin files. It no longer changes where `pez.toml` or `pez-lock.toml` live.
-- `PEZ_SUPPRESS_EMIT` — When set, suppress `fish -c 'emit ...'` hooks during install/upgrade/uninstall. Used by `pez activate fish` to avoid duplicate events.
+- `PEZ_SUPPRESS_EMIT` — When set, suppress out-of-process fish event hooks during install/upgrade/uninstall. Used by `pez activate fish` to avoid duplicate events.
 - `__fish_config_dir` / `XDG_CONFIG_HOME` — Fish configuration directory.
 - `__fish_user_data_dir` / `XDG_DATA_HOME` — Fish data directory.
 - `--jobs <N>` — Global CLI flag to override concurrency for `install` (explicit
