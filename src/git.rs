@@ -105,7 +105,7 @@ pub(crate) fn get_remote_head_commit(repo: &git2::Repository) -> anyhow::Result<
     fetch_all(repo)?;
     if let Ok(remote) = repo.find_remote("origin")
         && let Ok(buf) = remote.default_branch()
-        && let Some(name) = buf.as_str()
+        && let Ok(name) = buf.as_str()
         && let Some(branch) = name.strip_prefix("refs/heads/")
         && let Some(oid) = get_remote_branch_commit(repo, branch)?
     {
@@ -145,7 +145,7 @@ pub(crate) fn list_tags(repo: &git2::Repository) -> anyhow::Result<Vec<String>> 
     let names = repo.tag_names(None)?;
     let mut tags = Vec::new();
     for i in 0..names.len() {
-        if let Some(name) = names.get(i) {
+        if let Some(name) = names.get(i)? {
             tags.push(name.to_string());
         }
     }
@@ -284,10 +284,7 @@ fn pick_tag_for_version(tags: &[String], v: &str) -> anyhow::Result<Option<Strin
 // tests are in a submodule at the end of file
 
 fn get_remote_name(upstream: &git2::Branch) -> Result<String, Error> {
-    let upstream_ref = upstream
-        .get()
-        .name()
-        .ok_or_else(|| git2::Error::from_str("Upstream branch has no name"))?;
+    let upstream_ref = upstream.get().name()?;
     let parts: Vec<&str> = upstream_ref.split('/').collect();
     if parts.len() < 3 {
         return Err(Error::from_str(&format!(
@@ -301,9 +298,7 @@ pub(crate) fn get_latest_remote_commit(repo: &git2::Repository) -> anyhow::Resul
     let head = repo.head()?;
 
     if head.is_branch() {
-        let branch_name = head
-            .shorthand()
-            .ok_or_else(|| git2::Error::from_str("Invalid branch name"))?;
+        let branch_name = head.shorthand()?;
 
         let local_branch = repo.find_branch(branch_name, git2::BranchType::Local)?;
 
