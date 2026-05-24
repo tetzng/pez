@@ -675,8 +675,8 @@ mod tests {
         assert_eq!(updated.commit_sha, fixture.second_commit);
 
         let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
-        assert!(log_contents.contains("emit alpha_update"));
-        assert!(!log_contents.contains("emit beta_update"));
+        assert!(log_contents.contains("alpha_update"));
+        assert!(!log_contents.contains("beta_update"));
     }
 
     #[allow(clippy::await_holding_lock)]

@@ -629,8 +629,8 @@ owner/plugin-a
         uninstall(&repo, true).expect("uninstall should succeed");
 
         let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
-        assert!(log_contents.contains("emit alpha_uninstall"));
-        assert!(!log_contents.contains("emit beta_uninstall"));
+        assert!(log_contents.contains("alpha_uninstall"));
+        assert!(!log_contents.contains("beta_uninstall"));
     }
 
     #[allow(clippy::await_holding_lock)]
