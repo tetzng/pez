@@ -66,7 +66,7 @@
         {
           default = {
             type = "app";
-            program = "${package}/bin/pez";
+            program = "${package}/bin/${package.meta.mainProgram}";
             meta = package.meta;
           };
         }

@@ -40,6 +40,9 @@ Notes
 
 - On tagged releases (`v*.*.*`), CI builds, tests, and uploads release artifacts.
 - Asset filenames vary by platform; check the release page for the exact names.
+- Nix flake commands require flakes to be enabled. If they are not enabled
+  globally, run them as
+  `nix --extra-experimental-features 'nix-command flakes' <subcommand> ...`.
 
 ### Build from source
 
@@ -48,10 +51,10 @@ cargo build --release
 ./target/release/pez -V
 ```
 
-With Nix:
+With Nix flakes:
 
 ```shell
-nix build
+nix build .#
 ./result/bin/pez -V
 ```
 
@@ -60,12 +63,11 @@ nix build
 Enter the Nix development environment:
 
 ```shell
-nix develop
+nix develop .#
 ```
 
 This provides the Rust toolchain, `rustfmt`, `clippy`, and Fish for local
-development. If flakes are not enabled globally, pass
-`--extra-experimental-features 'nix-command flakes'` to the `nix` command.
+development.
 
 ### Shell completions
 
