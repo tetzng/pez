@@ -30,6 +30,12 @@ chmod +x pez
 ./pez -V
 ```
 
+With Nix flakes:
+
+```shell
+nix run github:tetzng/pez -- --version
+```
+
 Notes
 
 - On tagged releases (`v*.*.*`), CI builds, tests, and uploads release artifacts.
@@ -41,6 +47,25 @@ Notes
 cargo build --release
 ./target/release/pez -V
 ```
+
+With Nix:
+
+```shell
+nix build
+./result/bin/pez -V
+```
+
+### Development shell
+
+Enter the Nix development environment:
+
+```shell
+nix develop
+```
+
+This provides the Rust toolchain, `rustfmt`, `clippy`, and Fish for local
+development. If flakes are not enabled globally, pass
+`--extra-experimental-features 'nix-command flakes'` to the `nix` command.
 
 ### Shell completions
 
