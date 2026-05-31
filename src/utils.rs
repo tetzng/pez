@@ -182,6 +182,29 @@ pub(crate) fn remove_file_if_exists(path: &path::Path) -> anyhow::Result<bool> {
     }
 }
 
+pub(crate) fn ensure_file_removable_if_exists(path: &path::Path) -> anyhow::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_file() || file_type.is_symlink() {
+                Ok(true)
+            } else {
+                anyhow::bail!("Failed to remove {}: path is not a file", path.display());
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("Failed to inspect {}", path.display())),
+    }
+}
+
+pub(crate) fn ensure_files_removable(paths: &[path::PathBuf]) -> anyhow::Result<()> {
+    for path in paths {
+        ensure_file_removable_if_exists(path)?;
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct CopyOutcome {
     pub file_count: usize,

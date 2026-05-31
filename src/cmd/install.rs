@@ -594,9 +594,14 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
             for plugin in ignored_lock_file_plugins {
                 info!("{}Removing plugin: {}", Emoji("🐟 ", ""), &plugin.name);
                 let repo_path = utils::load_pez_data_dir()?.join(plugin.repo.as_str());
-                if repo_path.exists() {
-                    fs::remove_dir_all(&repo_path)?;
-                } else {
+                let fish_config_dir = utils::load_fish_config_dir()?;
+                let file_paths: Vec<_> = plugin
+                    .files
+                    .iter()
+                    .map(|file| file.get_path(&fish_config_dir))
+                    .collect();
+
+                if !repo_path.exists() {
                     let path_display = repo_path.display();
                     warn!(
                         "{}Repository directory at {} does not exist.",
@@ -609,16 +614,18 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                             "{}Detected plugin files based on pez-lock.toml:",
                             Emoji("📄 ", ""),
                         );
-                        let fish_config_dir = utils::load_fish_config_dir()?;
 
-                        plugin.files.iter().for_each(|file| {
-                            let dest_path =
-                                fish_config_dir.join(file.dir.as_str()).join(&file.name);
-                            info!("   - {}", dest_path.display());
-                        });
+                        file_paths
+                            .iter()
+                            .for_each(|dest_path| info!("   - {}", dest_path.display()));
                         info!("If you want to remove these files, use the --force flag.");
                         continue;
                     }
+                }
+
+                utils::ensure_files_removable(&file_paths)?;
+                if repo_path.exists() {
+                    fs::remove_dir_all(&repo_path)?;
                 }
 
                 info!(
@@ -626,19 +633,14 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     Emoji("🗑️  ", ""),
                 );
 
-                emit_event(&plugin, &utils::Event::Uninstall)?;
-
-                let fish_config_dir = utils::load_fish_config_dir()?;
-                for file in &plugin.files {
-                    let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
-                    if utils::remove_file_if_exists(&dest_path)? {
+                for dest_path in &file_paths {
+                    if utils::remove_file_if_exists(dest_path)? {
                         info!("   - {}", dest_path.display());
                     }
                 }
                 lock_file.remove_plugin(&plugin.source);
-                if let Err(e) = lock_file.save(&lock_file_path) {
-                    warn!("Failed to save lock file: {:?}", e);
-                }
+                lock_file.save(&lock_file_path)?;
+                emit_event(&plugin, &utils::Event::Uninstall)?;
             }
         } else {
             info!(
@@ -951,6 +953,7 @@ mod tests {
         let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
         let test_env = TestEnvironmentSetup::new();
         let _override = EnvOverride::new(&[
+            "PATH",
             "PEZ_CONFIG_DIR",
             "PEZ_DATA_DIR",
             "PEZ_TARGET_DIR",
@@ -1754,6 +1757,16 @@ mod tests {
             "HOME",
             "PEZ_SUPPRESS_EMIT",
         ]);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let bin_dir = temp_dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let log_path = temp_dir.path().join("fish.log");
+        let fish_path = bin_dir.join("fish");
+        let script = format!("#!/bin/sh\n\necho \"$@\" >> \"{}\"\n", log_path.display());
+        std::fs::write(&fish_path, script).unwrap();
+        let mut perms = std::fs::metadata(&fish_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fish_path, perms).unwrap();
 
         let repo = PluginRepo::new(None, "owner".to_string(), "blocked".to_string()).unwrap();
         test_env.setup_config(config::Config {
@@ -1767,21 +1780,25 @@ mod tests {
                 source: repo.default_remote_source(),
                 commit_sha: "blocked-sha".to_string(),
                 files: vec![PluginFile {
-                    dir: TargetDir::Functions,
+                    dir: TargetDir::ConfD,
                     name: "blocked.fish".to_string(),
                 }],
             }],
         });
+        let repo_path = test_env.data_dir.join(repo.as_str());
+        std::fs::create_dir_all(&repo_path).unwrap();
 
         let blocked_path = test_env
             .fish_config_dir
-            .join(TargetDir::Functions.as_str())
+            .join(TargetDir::ConfD.as_str())
             .join("blocked.fish");
         std::fs::create_dir_all(&blocked_path).unwrap();
 
         set_test_env_vars(&test_env);
+        let existing_path = std::env::var("PATH").unwrap_or_default();
         unsafe {
-            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+            std::env::set_var("PATH", format!("{}:{}", bin_dir.display(), existing_path));
+            std::env::remove_var("PEZ_SUPPRESS_EMIT");
         }
 
         let force = true;
@@ -1793,6 +1810,14 @@ mod tests {
         let saved_lock = crate::lock_file::load(&test_env.lock_file_path).unwrap();
         assert!(saved_lock.get_plugin_by_repo(&repo).is_some());
         assert!(blocked_path.is_dir());
+        assert!(
+            repo_path.exists(),
+            "repo directory should remain when file deletion is rejected"
+        );
+        assert!(
+            !log_path.exists(),
+            "uninstall event should not be emitted when deletion is rejected"
+        );
     }
 
     #[test]

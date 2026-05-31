@@ -109,7 +109,7 @@ Global options (apply to all commands)
 - Output shell activation code that wraps `pez` with hooks in the current shell.
 - Usage: `pez activate fish | source` (for persistence, add inside `if status is-interactive ... end` in `~/.config/fish/config.fish`).
 - Behavior: after `install`/`upgrade`, sources matching `conf.d` files and emits `<stem>_{install|update}` in the current shell; before `uninstall`, emits `<stem>_uninstall`.
-- Out-of-process event emits only run for safe stems (`A-Z`, `a-z`, `0-9`, `_`, `-`, or `.`).
+- Out-of-process event emits only run for safe stems (`A-Z`, `a-z`, `0-9`, `_`, `-`, or `.`); uninstall emits run only after cleanup and state updates succeed.
 - When active, the wrapper runs `pez` with `PEZ_SUPPRESS_EMIT=1` to avoid duplicate out-of-process emits.
 
 ### files

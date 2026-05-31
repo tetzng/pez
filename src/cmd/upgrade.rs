@@ -146,11 +146,16 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                     return Ok(());
                 }
 
+                let old_file_paths: Vec<_> = lock_file_plugin
+                    .files
+                    .iter()
+                    .map(|file| file.get_path(&config_dir))
+                    .collect();
+                utils::ensure_files_removable(&old_file_paths)?;
                 git::checkout_commit(&repo, &latest_remote_commit)?;
 
-                for file in &lock_file_plugin.files {
-                    let dest_path = file.get_path(&config_dir);
-                    if utils::remove_file_if_exists(&dest_path)? {
+                for dest_path in &old_file_paths {
+                    if utils::remove_file_if_exists(dest_path)? {
                         info!("   - {}", dest_path.display());
                     }
                 }
@@ -689,6 +694,12 @@ mod tests {
         }
 
         fixture.env.setup_fish_config();
+        let alpha_path = fixture
+            .env
+            .fish_config_dir
+            .join(TargetDir::ConfD.as_str())
+            .join("alpha.fish");
+        assert!(alpha_path.exists());
         let beta_path = fixture
             .env
             .fish_config_dir
@@ -696,15 +707,6 @@ mod tests {
             .join("beta.fish");
         std::fs::remove_file(&beta_path).unwrap();
         std::fs::create_dir_all(&beta_path).unwrap();
-
-        let mut lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
-        let locked = lock.get_plugin_by_repo(&fixture.repo).unwrap().clone();
-        let mut files = locked.files.clone();
-        files.swap(0, 1);
-        let mut reordered = locked;
-        reordered.files = files;
-        lock.update_plugin(reordered).unwrap();
-        lock.save(&fixture.env.lock_file_path).unwrap();
 
         let repo_path = fixture.env.data_dir.join(fixture.repo.as_str());
         let repo = git2::Repository::open(&repo_path).unwrap();
@@ -724,7 +726,16 @@ mod tests {
                 .iter()
                 .any(|file| file.dir == TargetDir::Functions && file.name == "beta.fish")
         );
+        assert!(
+            alpha_path.exists(),
+            "earlier removable files should remain when another file is rejected"
+        );
         assert!(beta_path.is_dir());
+        assert_eq!(
+            crate::git::get_latest_commit_sha(&repo).unwrap(),
+            fixture.first_commit,
+            "repo checkout should not advance when old file removal is rejected"
+        );
     }
 
     #[allow(clippy::await_holding_lock)]
