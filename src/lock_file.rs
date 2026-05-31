@@ -20,15 +20,28 @@ pub(crate) fn init() -> LockFile {
 
 pub(crate) fn load(path: &path::Path) -> anyhow::Result<LockFile> {
     let content = fs::read_to_string(path)?;
-    let lock_file = toml::from_str(&content)?;
+    let lock_file: LockFile = toml::from_str(&content)?;
+    lock_file.validate()?;
 
     Ok(lock_file)
 }
 
 impl LockFile {
     pub(crate) fn save(&self, path: &path::Path) -> anyhow::Result<()> {
+        self.validate()?;
+
         let contents = toml::to_string(self)?;
         fs::write(path, AUTO_GENERATED_COMMENT.to_string() + &contents)?;
+
+        Ok(())
+    }
+
+    fn validate(&self) -> anyhow::Result<()> {
+        for plugin in &self.plugins {
+            for file in &plugin.files {
+                file.validate_name()?;
+            }
+        }
 
         Ok(())
     }
@@ -153,6 +166,31 @@ impl Plugin {
 impl PluginFile {
     pub(crate) fn get_path(&self, config_dir: &path::Path) -> path::PathBuf {
         config_dir.join(self.dir.as_str()).join(&self.name)
+    }
+
+    fn validate_name(&self) -> anyhow::Result<()> {
+        if self.name.is_empty() {
+            anyhow::bail!(
+                "Invalid plugin file path for {}: {}",
+                self.dir.as_str(),
+                self.name
+            );
+        }
+
+        let file_path = path::Path::new(&self.name);
+        if file_path.is_absolute()
+            || !file_path
+                .components()
+                .all(|component| matches!(component, path::Component::Normal(_)))
+        {
+            anyhow::bail!(
+                "Invalid plugin file path for {}: {}",
+                self.dir.as_str(),
+                self.name
+            );
+        }
+
+        Ok(())
     }
 }
 
@@ -301,5 +339,67 @@ mod tests {
             files: vec![],
         };
         assert_eq!(unnamed.get_name(), "repo");
+    }
+
+    #[test]
+    fn load_rejects_parent_dir_plugin_file_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("pez-lock.toml");
+        fs::write(
+            &path,
+            r#"
+version = 1
+
+[[plugins]]
+name = "repo"
+repo = "owner/repo"
+source = "https://example.com/owner/repo"
+commit_sha = "deadbeef"
+files = [{ dir = "functions", name = "../config.fish" }]
+"#,
+        )
+        .unwrap();
+
+        let err = load(&path).expect_err("path traversal should be rejected");
+
+        assert!(
+            err.to_string().contains("Invalid plugin file path"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.to_string().contains("../config.fish"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn load_rejects_absolute_plugin_file_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("pez-lock.toml");
+        fs::write(
+            &path,
+            r#"
+version = 1
+
+[[plugins]]
+name = "repo"
+repo = "owner/repo"
+source = "https://example.com/owner/repo"
+commit_sha = "deadbeef"
+files = [{ dir = "functions", name = "/tmp/evil.fish" }]
+"#,
+        )
+        .unwrap();
+
+        let err = load(&path).expect_err("absolute path should be rejected");
+
+        assert!(
+            err.to_string().contains("Invalid plugin file path"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.to_string().contains("/tmp/evil.fish"),
+            "unexpected error: {err}"
+        );
     }
 }
