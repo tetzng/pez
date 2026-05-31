@@ -43,7 +43,7 @@ nix run github:tetzng/pez -- --version
 ```
 
 If flakes are not enabled globally, run it as
-`nix --extra-experimental-features 'nix-command flakes' run ...`.
+`nix --extra-experimental-features 'nix-command flakes' run github:tetzng/pez -- --version`.
 
 ## Quickstart
 

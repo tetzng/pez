@@ -17,6 +17,9 @@
 
       forAllSystems = nixpkgs.lib.genAttrs systems;
       cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+      licenseBySpdx = {
+        MIT = nixpkgs.lib.licenses.mit;
+      };
     in
     {
       packages = forAllSystems (
@@ -50,7 +53,9 @@
             meta = with pkgs.lib; {
               description = cargoToml.package.description;
               homepage = cargoToml.package.homepage;
-              license = licenses.mit;
+              license =
+                licenseBySpdx.${cargoToml.package.license}
+                  or (throw "Unsupported Cargo.toml license: ${cargoToml.package.license}");
               mainProgram = cargoToml.package.name;
               platforms = platforms.unix;
             };

@@ -67,7 +67,9 @@ nix develop .#
 ```
 
 This provides the Rust toolchain, `rustfmt`, `clippy`, and Fish for local
-development.
+development from the pinned Nix flake input. It does not read
+`rust-toolchain.toml`; use rustup outside Nix when you need that file to select
+the toolchain exactly.
 
 ### Shell completions
 
