@@ -211,7 +211,7 @@ pub(crate) fn copy_plugin_files(
             .filter_map(Result::ok)
         {
             let entry_path = entry.path();
-            if entry.file_type().is_dir() {
+            if !entry.file_type().is_file() {
                 continue;
             }
             if let Some(ext) = expected_ext
@@ -282,7 +282,7 @@ fn copy_plugin_files_recursive(
 
     for entry in WalkDir::new(target_path).into_iter().filter_map(Result::ok) {
         let entry_path = entry.path();
-        if entry.file_type().is_dir() {
+        if !entry.file_type().is_file() {
             continue;
         }
         if let Some(ext) = expected_ext
@@ -1133,6 +1133,46 @@ mod tests {
                 .fish_config_dir
                 .join("functions")
                 .join("nested/dir/tool.fish")
+                .exists()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_plugin_files_skips_symlinked_files() {
+        use std::os::unix::fs::symlink;
+
+        let test_env = TestEnvironmentSetup::new();
+        let mut test_data = TestDataBuilder::new().build();
+
+        let repo = test_data.plugin_spec.get_plugin_repo().unwrap();
+        let functions_dir = test_env
+            .data_dir
+            .join(repo.as_str())
+            .join(TargetDir::Functions.as_str());
+        std::fs::create_dir_all(&functions_dir).unwrap();
+
+        let linked_target = test_env._temp_dir.path().join("outside.fish");
+        std::fs::write(&linked_target, "function outside\nend\n").unwrap();
+        symlink(&linked_target, functions_dir.join("linked.fish")).unwrap();
+
+        let repo_path = test_env.data_dir.join(repo.as_str());
+        let outcome = copy_plugin_files(
+            &repo_path,
+            &test_env.fish_config_dir,
+            &mut test_data.plugin,
+            None,
+            false,
+        )
+        .expect("copy should succeed");
+
+        assert_eq!(outcome.file_count, 0);
+        assert!(test_data.plugin.files.is_empty());
+        assert!(
+            !test_env
+                .fish_config_dir
+                .join("functions")
+                .join("linked.fish")
                 .exists()
         );
     }
