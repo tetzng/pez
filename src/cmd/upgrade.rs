@@ -3,9 +3,10 @@ use crate::{
     git,
     lock_file::Plugin,
     models::{PluginRepo, TargetDir},
-    utils,
+    resolver, utils,
 };
 
+use anyhow::Context;
 use console::Emoji;
 use futures::{StreamExt, stream};
 use std::fs;
@@ -84,6 +85,26 @@ async fn upgrade_all() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn resolve_upgrade_commit(
+    repo: &git2::Repository,
+    plugin_repo: &PluginRepo,
+    ref_kind: &resolver::RefKind,
+) -> anyhow::Result<String> {
+    let sel = resolver::selection_from_ref_kind(ref_kind);
+    match git::resolve_selection(repo, &sel) {
+        Ok(c) => Ok(c),
+        Err(e) if resolver::ref_kind_allows_head_fallback(ref_kind) => {
+            warn!(
+                "Failed to resolve selection for {}: {:?}. Falling back to remote HEAD.",
+                plugin_repo, e
+            );
+            git::get_latest_remote_commit(repo)
+        }
+        Err(e) => Err(e)
+            .with_context(|| format!("failed to resolve requested ref for plugin {plugin_repo}")),
+    }
+}
+
 fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
     let (mut lock_file, lock_file_path) = utils::load_or_create_lock_file()?;
     let (config, _) = utils::load_or_create_config()?;
@@ -104,7 +125,7 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
             if repo_path.exists() {
                 let repo = git2::Repository::open(&repo_path)?;
                 // Determine desired selection from config (if present); fall back to default head
-                let sel = config
+                let ref_kind = config
                     .plugins
                     .as_ref()
                     .and_then(|ps| {
@@ -112,19 +133,10 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                             .find(|p| p.get_plugin_repo().ok().as_ref() == Some(plugin_repo))
                             .and_then(|p| p.to_resolved().ok())
                     })
-                    .map(|r| crate::resolver::selection_from_ref_kind(&r.ref_kind))
-                    .unwrap_or(crate::resolver::Selection::DefaultHead);
+                    .map(|r| r.ref_kind)
+                    .unwrap_or(crate::resolver::RefKind::None);
 
-                let latest_remote_commit = match git::resolve_selection(&repo, &sel) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        warn!(
-                            "Failed to resolve selection for {}: {:?}. Falling back to remote HEAD.",
-                            plugin_repo, e
-                        );
-                        git::get_latest_remote_commit(&repo)?
-                    }
-                };
+                let latest_remote_commit = resolve_upgrade_commit(&repo, plugin_repo, &ref_kind)?;
                 if latest_remote_commit == lock_file_plugin.commit_sha {
                     info!(
                         "{} {} Plugin {} is already up to date.",
@@ -573,6 +585,46 @@ mod tests {
         });
 
         upgrade_plugin(&fixture.repo).expect("upgrade should succeed");
+
+        let lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
+        let updated = lock.get_plugin_by_repo(&fixture.repo).unwrap();
+        assert_eq!(updated.commit_sha, fixture.first_commit);
+    }
+
+    #[test]
+    fn upgrade_plugin_fails_when_explicit_selector_is_unresolved() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        crate::utils::clear_cli_jobs_override_for_tests();
+        let mut fixture = UpgradeFixture::new(false);
+        let _override = EnvOverride::new(&[
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+        ]);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+            std::env::set_var("__fish_config_dir", &fixture.env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &fixture.env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &fixture.env.data_dir);
+        }
+
+        fixture.env.setup_config(config::Config {
+            plugins: Some(vec![config::PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: fixture.repo.clone(),
+                    version: None,
+                    branch: Some("missing-branch".into()),
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        });
+
+        let err = upgrade_plugin(&fixture.repo).expect_err("upgrade should fail");
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("missing-branch"), "{err_text}");
 
         let lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
         let updated = lock.get_plugin_by_repo(&fixture.repo).unwrap();
