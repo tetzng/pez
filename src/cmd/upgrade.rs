@@ -9,7 +9,6 @@ use crate::{
 use anyhow::Context;
 use console::Emoji;
 use futures::{StreamExt, stream};
-use std::fs;
 use tracing::{error, info, warn};
 
 pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
@@ -149,14 +148,12 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
 
                 git::checkout_commit(&repo, &latest_remote_commit)?;
 
-                lock_file_plugin.files.iter().for_each(|file| {
-                    let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
-                    if dest_path.exists()
-                        && let Err(e) = fs::remove_file(&dest_path)
-                    {
-                        warn!("Failed to remove {}: {:?}", dest_path.display(), e);
+                for file in &lock_file_plugin.files {
+                    let dest_path = file.get_path(&config_dir);
+                    if utils::remove_file_if_exists(&dest_path)? {
+                        info!("   - {}", dest_path.display());
                     }
-                });
+                }
                 let mut updated_plugin = Plugin {
                     name: lock_file_plugin.name.to_string(),
                     repo: plugin_repo.clone(),
@@ -671,6 +668,63 @@ mod tests {
             .join(TargetDir::Functions.as_str())
             .join("beta.fish");
         assert!(!beta_path.exists());
+    }
+
+    #[test]
+    fn upgrade_plugin_preserves_lock_when_old_file_removal_fails() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        crate::utils::clear_cli_jobs_override_for_tests();
+        let fixture = UpgradeFixture::new(false);
+        let _override = EnvOverride::new(&[
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+        ]);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+            std::env::set_var("__fish_config_dir", &fixture.env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &fixture.env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &fixture.env.data_dir);
+        }
+
+        fixture.env.setup_fish_config();
+        let beta_path = fixture
+            .env
+            .fish_config_dir
+            .join(TargetDir::Functions.as_str())
+            .join("beta.fish");
+        std::fs::remove_file(&beta_path).unwrap();
+        std::fs::create_dir_all(&beta_path).unwrap();
+
+        let mut lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
+        let locked = lock.get_plugin_by_repo(&fixture.repo).unwrap().clone();
+        let mut files = locked.files.clone();
+        files.swap(0, 1);
+        let mut reordered = locked;
+        reordered.files = files;
+        lock.update_plugin(reordered).unwrap();
+        lock.save(&fixture.env.lock_file_path).unwrap();
+
+        let repo_path = fixture.env.data_dir.join(fixture.repo.as_str());
+        let repo = git2::Repository::open(&repo_path).unwrap();
+        crate::git::checkout_commit(&repo, &fixture.first_commit).unwrap();
+
+        let err =
+            upgrade_plugin(&fixture.repo).expect_err("file removal failure should abort upgrade");
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Failed to remove"), "{err_text}");
+
+        let saved_lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
+        let saved_plugin = saved_lock.get_plugin_by_repo(&fixture.repo).unwrap();
+        assert_eq!(saved_plugin.commit_sha, fixture.first_commit);
+        assert!(
+            saved_plugin
+                .files
+                .iter()
+                .any(|file| file.dir == TargetDir::Functions && file.name == "beta.fish")
+        );
+        assert!(beta_path.is_dir());
     }
 
     #[allow(clippy::await_holding_lock)]

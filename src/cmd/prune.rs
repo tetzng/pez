@@ -156,16 +156,12 @@ where
             "{}Removing plugin files based on pez-lock.toml:",
             Emoji("🗑️  ", ""),
         );
-        plugin.files.iter().for_each(|file| {
+        for file in &plugin.files {
             let dest_path = file.get_path(ctx.fish_config_dir);
-            if dest_path.exists() {
-                let path_display = dest_path.display();
-                info!("   - {}", path_display);
-                if let Err(e) = fs::remove_file(&dest_path) {
-                    warn!("Failed to remove {}: {:?}", path_display, e);
-                }
+            if utils::remove_file_if_exists(&dest_path)? {
+                info!("   - {}", dest_path.display());
             }
-        });
+        }
         ctx.lock_file.remove_plugin(&plugin.source);
         ctx.lock_file.save(ctx.lock_file_path)?;
     }
@@ -258,12 +254,14 @@ where
                 );
                 for file in &plugin.files {
                     let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
-                    if dest_path.exists() {
-                        let to_delete = dest_path.clone();
-                        let _ = tokio::task::spawn_blocking(move || fs::remove_file(&to_delete))
-                            .await
-                            .map_err(|e| anyhow::anyhow!(e))
-                            .and_then(|res| res.map_err(|e| anyhow::anyhow!(e)));
+                    let to_delete = dest_path.clone();
+                    let removed = tokio::task::spawn_blocking(move || {
+                        utils::remove_file_if_exists(&to_delete)
+                    })
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))??;
+                    if removed {
+                        info!("   - {}", dest_path.display());
                     }
                 }
 
@@ -846,6 +844,38 @@ mod tests {
             fs::metadata(test_env.fish_config_dir.join("functions/used.fish")).is_ok(),
             "Used plugin file should still exist"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prune_parallel_preserves_lock_when_plugin_file_removal_fails() {
+        let _jobs = JobsGuard::set(1);
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        let unused_repo = test_data.unused_plugin.repo.clone();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+
+        let blocked_path = test_env
+            .fish_config_dir
+            .join(TargetDir::Functions.as_str())
+            .join("unused.fish");
+        std::fs::create_dir_all(&blocked_path).unwrap();
+
+        let mut ctx = test_env.create_context();
+        let err = prune_parallel_with_confirm(true, true, &mut ctx, || Ok(true))
+            .await
+            .expect_err("file removal failure should abort prune");
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Failed to remove"), "{err_text}");
+
+        let saved = lock_file::load(ctx.lock_file_path).unwrap();
+        assert!(saved.get_plugin_by_repo(&unused_repo).is_some());
+        assert!(blocked_path.is_dir());
     }
 
     #[tokio::test(flavor = "multi_thread")]

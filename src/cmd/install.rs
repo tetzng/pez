@@ -631,10 +631,8 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 let fish_config_dir = utils::load_fish_config_dir()?;
                 for file in &plugin.files {
                     let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
-                    if dest_path.exists()
-                        && let Err(e) = fs::remove_file(&dest_path)
-                    {
-                        warn!("Failed to remove {}: {:?}", dest_path.display(), e);
+                    if utils::remove_file_if_exists(&dest_path)? {
+                        info!("   - {}", dest_path.display());
                     }
                 }
                 lock_file.remove_plugin(&plugin.source);
@@ -1739,6 +1737,62 @@ mod tests {
             .collect();
         assert!(ignored_lines.iter().any(|line| line.contains("extra")));
         assert!(!ignored_lines.iter().any(|line| line.contains("keep")));
+    }
+
+    #[test]
+    fn install_all_prune_preserves_lock_when_plugin_file_removal_fails() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let repo = PluginRepo::new(None, "owner".to_string(), "blocked".to_string()).unwrap();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![]),
+        });
+        test_env.setup_lock_file(crate::lock_file::LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: repo.repo.clone(),
+                repo: repo.clone(),
+                source: repo.default_remote_source(),
+                commit_sha: "blocked-sha".to_string(),
+                files: vec![PluginFile {
+                    dir: TargetDir::Functions,
+                    name: "blocked.fish".to_string(),
+                }],
+            }],
+        });
+
+        let blocked_path = test_env
+            .fish_config_dir
+            .join(TargetDir::Functions.as_str())
+            .join("blocked.fish");
+        std::fs::create_dir_all(&blocked_path).unwrap();
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+
+        let force = true;
+        let prune = true;
+        let err = install_all(&force, &prune).expect_err("file removal failure should abort prune");
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Failed to remove"), "{err_text}");
+
+        let saved_lock = crate::lock_file::load(&test_env.lock_file_path).unwrap();
+        assert!(saved_lock.get_plugin_by_repo(&repo).is_some());
+        assert!(blocked_path.is_dir());
     }
 
     #[test]

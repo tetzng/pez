@@ -174,6 +174,14 @@ pub(crate) fn copy_plugin_files_from_repo(
     Ok(())
 }
 
+pub(crate) fn remove_file_if_exists(path: &path::Path) -> anyhow::Result<bool> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("Failed to remove {}", path.display())),
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct CopyOutcome {
     pub file_count: usize,
