@@ -30,10 +30,19 @@ chmod +x pez
 ./pez -V
 ```
 
+With Nix flakes:
+
+```shell
+nix run github:tetzng/pez -- --version
+```
+
 Notes
 
 - On tagged releases (`v*.*.*`), CI builds, tests, and uploads release artifacts.
 - Asset filenames vary by platform; check the release page for the exact names.
+- Nix flake commands require flakes to be enabled. If they are not enabled
+  globally, run them as
+  `nix --extra-experimental-features 'nix-command flakes' <subcommand> ...`.
 
 ### Build from source
 
@@ -41,6 +50,26 @@ Notes
 cargo build --release
 ./target/release/pez -V
 ```
+
+With Nix flakes:
+
+```shell
+nix build .#
+./result/bin/pez -V
+```
+
+### Development shell
+
+Enter the Nix development environment:
+
+```shell
+nix develop .#
+```
+
+This provides the Rust toolchain, `rustfmt`, `clippy`, and Fish for local
+development from the pinned Nix flake input. It does not read
+`rust-toolchain.toml`; use rustup outside Nix when you need that file to select
+the toolchain exactly.
 
 ### Shell completions
 

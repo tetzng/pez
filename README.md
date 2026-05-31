@@ -36,6 +36,15 @@ cargo install --path .
 
 Or use a prebuilt release binary (when available), which does not require Cargo.
 
+With Nix flakes:
+
+```sh
+nix run github:tetzng/pez -- --version
+```
+
+If flakes are not enabled globally, run it as
+`nix --extra-experimental-features 'nix-command flakes' run github:tetzng/pez -- --version`.
+
 ## Quickstart
 
 ```fish
