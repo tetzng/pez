@@ -1747,6 +1747,7 @@ mod tests {
         let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
         let mut test_env = TestEnvironmentSetup::new();
         let _override = EnvOverride::new(&[
+            "PATH",
             "PEZ_CONFIG_DIR",
             "PEZ_DATA_DIR",
             "PEZ_TARGET_DIR",

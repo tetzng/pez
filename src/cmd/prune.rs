@@ -259,7 +259,10 @@ where
                     }
                 }
 
-                let staged_removals = utils::stage_files_for_removal(&file_paths)?;
+                let staged_removals = tokio::task::spawn_blocking(move || {
+                    utils::stage_files_for_removal(&file_paths)
+                })
+                .await??;
 
                 info!(
                     "{}Removing plugin files based on pez-lock.toml:",
