@@ -623,23 +623,23 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     }
                 }
 
-                utils::ensure_files_removable(&file_paths)?;
-                if repo_path.exists() {
-                    fs::remove_dir_all(&repo_path)?;
-                }
+                let staged_removals = utils::stage_files_for_removal(&file_paths)?;
 
                 info!(
                     "{}Removing plugin files based on pez-lock.toml:",
                     Emoji("🗑️  ", ""),
                 );
 
-                for dest_path in &file_paths {
-                    if utils::remove_file_if_exists(dest_path)? {
-                        info!("   - {}", dest_path.display());
-                    }
+                for dest_path in staged_removals.removed_paths() {
+                    info!("   - {}", dest_path.display());
+                }
+
+                if repo_path.exists() {
+                    fs::remove_dir_all(&repo_path)?;
                 }
                 lock_file.remove_plugin(&plugin.source);
                 lock_file.save(&lock_file_path)?;
+                staged_removals.commit();
                 emit_event(&plugin, &utils::Event::Uninstall)?;
             }
         } else {
@@ -1792,7 +1792,13 @@ mod tests {
             .fish_config_dir
             .join(TargetDir::ConfD.as_str())
             .join("blocked.fish");
-        std::fs::create_dir_all(&blocked_path).unwrap();
+        std::fs::create_dir_all(blocked_path.parent().unwrap()).unwrap();
+        std::fs::write(&blocked_path, "echo blocked\n").unwrap();
+        let conf_d_dir = blocked_path.parent().unwrap();
+        let original_perms = std::fs::metadata(conf_d_dir).unwrap().permissions();
+        let mut read_only_perms = original_perms.clone();
+        read_only_perms.set_mode(0o500);
+        std::fs::set_permissions(conf_d_dir, read_only_perms).unwrap();
 
         set_test_env_vars(&test_env);
         let existing_path = std::env::var("PATH").unwrap_or_default();
@@ -1804,12 +1810,13 @@ mod tests {
         let force = true;
         let prune = true;
         let err = install_all(&force, &prune).expect_err("file removal failure should abort prune");
+        std::fs::set_permissions(conf_d_dir, original_perms).unwrap();
         let err_text = format!("{:#}", err);
         assert!(err_text.contains("Failed to remove"), "{err_text}");
 
         let saved_lock = crate::lock_file::load(&test_env.lock_file_path).unwrap();
         assert!(saved_lock.get_plugin_by_repo(&repo).is_some());
-        assert!(blocked_path.is_dir());
+        assert!(blocked_path.is_file());
         assert!(
             repo_path.exists(),
             "repo directory should remain when file deletion is rejected"

@@ -116,19 +116,18 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 }
             }
 
-            utils::ensure_files_removable(&file_paths)?;
-            if repo_path.exists() {
-                fs::remove_dir_all(&repo_path)?;
-            }
+            let staged_removals = utils::stage_files_for_removal(&file_paths)?;
 
             info!(
                 "{}Removing plugin files based on pez-lock.toml:",
                 Emoji("🗑️  ", ""),
             );
-            for dest_path in &file_paths {
-                if utils::remove_file_if_exists(dest_path)? {
-                    info!("   - {}", dest_path.display());
-                }
+            for dest_path in staged_removals.removed_paths() {
+                info!("   - {}", dest_path.display());
+            }
+
+            if repo_path.exists() {
+                fs::remove_dir_all(&repo_path)?;
             }
             lock_file.remove_plugin(&locked.source);
             lock_file.save(&lock_file_path)?;
@@ -138,6 +137,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 config.save(&config_path)?;
             }
 
+            staged_removals.commit();
             locked
                 .files
                 .iter()
@@ -611,14 +611,22 @@ owner/plugin-a
                 }],
             }],
         });
+        env.setup_data_repo(vec![repo.clone()]);
 
         let blocked_path = env
             .fish_config_dir
             .join(TargetDir::ConfD.as_str())
             .join("blocked.fish");
-        std::fs::create_dir_all(&blocked_path).unwrap();
+        std::fs::create_dir_all(blocked_path.parent().unwrap()).unwrap();
+        std::fs::write(&blocked_path, "echo blocked\n").unwrap();
+        let conf_d_dir = blocked_path.parent().unwrap();
+        let original_perms = std::fs::metadata(conf_d_dir).unwrap().permissions();
+        let mut read_only_perms = original_perms.clone();
+        read_only_perms.set_mode(0o500);
+        std::fs::set_permissions(conf_d_dir, read_only_perms).unwrap();
 
         let err = uninstall(&repo, true).expect_err("file removal failure should abort uninstall");
+        std::fs::set_permissions(conf_d_dir, original_perms).unwrap();
         let err_text = format!("{:#}", err);
         assert!(err_text.contains("Failed to remove"), "{err_text}");
 
@@ -633,7 +641,11 @@ owner/plugin-a
                 .as_ref()
                 == Some(&repo))
         );
-        assert!(blocked_path.is_dir());
+        assert!(blocked_path.is_file());
+        assert!(
+            env.data_dir.join(repo.as_str()).exists(),
+            "repo directory should remain when file deletion fails"
+        );
         assert!(
             !log_path.exists(),
             "uninstall event should not be emitted when deletion is rejected"

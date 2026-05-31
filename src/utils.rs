@@ -7,7 +7,9 @@ use anyhow::Context;
 use console::Emoji;
 use std::{
     collections::HashSet,
-    env, fmt, fs, path,
+    env,
+    ffi::OsString,
+    fmt, fs, path, process,
     sync::{Mutex, OnceLock},
 };
 use tracing::{debug, error, info, warn};
@@ -203,6 +205,129 @@ pub(crate) fn ensure_files_removable(paths: &[path::PathBuf]) -> anyhow::Result<
     }
 
     Ok(())
+}
+
+pub(crate) struct StagedFileRemovals {
+    entries: Vec<StagedFileRemoval>,
+    committed: bool,
+}
+
+struct StagedFileRemoval {
+    original: path::PathBuf,
+    staged: path::PathBuf,
+}
+
+impl StagedFileRemovals {
+    pub(crate) fn removed_paths(&self) -> impl Iterator<Item = &path::Path> {
+        self.entries.iter().map(|entry| entry.original.as_path())
+    }
+
+    pub(crate) fn commit(mut self) {
+        self.committed = true;
+        for entry in &self.entries {
+            if let Err(err) = remove_file_if_exists(&entry.staged) {
+                warn!(
+                    "Failed to clean staged removal {}: {:?}",
+                    entry.staged.display(),
+                    err
+                );
+            }
+        }
+    }
+}
+
+impl Drop for StagedFileRemovals {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+
+        for entry in self.entries.iter().rev() {
+            if !path_exists(&entry.staged) {
+                continue;
+            }
+
+            if path_exists(&entry.original)
+                && let Err(err) = remove_file_if_exists(&entry.original)
+            {
+                warn!(
+                    "Failed to restore {} from staged removal {}: {:?}",
+                    entry.original.display(),
+                    entry.staged.display(),
+                    err
+                );
+                continue;
+            }
+
+            if let Err(err) = fs::rename(&entry.staged, &entry.original) {
+                warn!(
+                    "Failed to restore {} from staged removal {}: {:?}",
+                    entry.original.display(),
+                    entry.staged.display(),
+                    err
+                );
+            }
+        }
+    }
+}
+
+pub(crate) fn stage_files_for_removal(
+    paths: &[path::PathBuf],
+) -> anyhow::Result<StagedFileRemovals> {
+    ensure_files_removable(paths)?;
+
+    let mut staged_removals = StagedFileRemovals {
+        entries: Vec::new(),
+        committed: false,
+    };
+    for (index, path) in paths.iter().enumerate() {
+        if !ensure_file_removable_if_exists(path)? {
+            continue;
+        }
+
+        let staged = unique_staged_removal_path(path, index)?;
+        fs::rename(path, &staged)
+            .with_context(|| format!("Failed to remove {}", path.display()))?;
+        staged_removals.entries.push(StagedFileRemoval {
+            original: path.clone(),
+            staged,
+        });
+    }
+
+    Ok(staged_removals)
+}
+
+fn unique_staged_removal_path(path: &path::Path, index: usize) -> anyhow::Result<path::PathBuf> {
+    let parent = path
+        .parent()
+        .with_context(|| format!("Failed to remove {}: path has no parent", path.display()))?;
+    let file_name = path
+        .file_name()
+        .with_context(|| format!("Failed to remove {}: path has no file name", path.display()))?;
+
+    for attempt in 0..1000 {
+        let mut staged_name = OsString::from(".pez-removing-");
+        staged_name.push(process::id().to_string());
+        staged_name.push("-");
+        staged_name.push(index.to_string());
+        staged_name.push("-");
+        staged_name.push(attempt.to_string());
+        staged_name.push("-");
+        staged_name.push(file_name);
+        let candidate = parent.join(staged_name);
+        if !path_exists(&candidate) {
+            return Ok(candidate);
+        }
+    }
+
+    anyhow::bail!(
+        "Failed to remove {}: no staging path available",
+        path.display()
+    );
+}
+
+fn path_exists(path: &path::Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
 }
 
 #[derive(Debug, Default, Clone)]

@@ -151,14 +151,12 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                     .iter()
                     .map(|file| file.get_path(&config_dir))
                     .collect();
-                utils::ensure_files_removable(&old_file_paths)?;
-                git::checkout_commit(&repo, &latest_remote_commit)?;
+                let staged_removals = utils::stage_files_for_removal(&old_file_paths)?;
 
-                for dest_path in &old_file_paths {
-                    if utils::remove_file_if_exists(dest_path)? {
-                        info!("   - {}", dest_path.display());
-                    }
+                for dest_path in staged_removals.removed_paths() {
+                    info!("   - {}", dest_path.display());
                 }
+                git::checkout_commit(&repo, &latest_remote_commit)?;
                 let mut updated_plugin = Plugin {
                     name: lock_file_plugin.name.to_string(),
                     repo: plugin_repo.clone(),
@@ -184,6 +182,7 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                     warn!("Failed to update lock file: {:?}", e);
                 }
                 lock_file.save(&lock_file_path)?;
+                staged_removals.commit();
             } else {
                 let path_display = repo_path.display();
                 warn!(
@@ -705,8 +704,11 @@ mod tests {
             .fish_config_dir
             .join(TargetDir::Functions.as_str())
             .join("beta.fish");
-        std::fs::remove_file(&beta_path).unwrap();
-        std::fs::create_dir_all(&beta_path).unwrap();
+        let functions_dir = beta_path.parent().unwrap();
+        let original_perms = std::fs::metadata(functions_dir).unwrap().permissions();
+        let mut read_only_perms = original_perms.clone();
+        read_only_perms.set_mode(0o500);
+        std::fs::set_permissions(functions_dir, read_only_perms).unwrap();
 
         let repo_path = fixture.env.data_dir.join(fixture.repo.as_str());
         let repo = git2::Repository::open(&repo_path).unwrap();
@@ -714,6 +716,7 @@ mod tests {
 
         let err =
             upgrade_plugin(&fixture.repo).expect_err("file removal failure should abort upgrade");
+        std::fs::set_permissions(functions_dir, original_perms).unwrap();
         let err_text = format!("{:#}", err);
         assert!(err_text.contains("Failed to remove"), "{err_text}");
 
@@ -730,7 +733,7 @@ mod tests {
             alpha_path.exists(),
             "earlier removable files should remain when another file is rejected"
         );
-        assert!(beta_path.is_dir());
+        assert!(beta_path.is_file());
         assert_eq!(
             crate::git::get_latest_commit_sha(&repo).unwrap(),
             fixture.first_commit,
