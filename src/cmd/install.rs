@@ -120,6 +120,26 @@ fn cleanup_prepared_remote_repos(plugins: &[Plugin], pez_data_dir: &path::Path) 
     }
 }
 
+fn resolve_install_commit(
+    repo: &git2::Repository,
+    ref_kind: &resolver::RefKind,
+    source: &str,
+) -> anyhow::Result<String> {
+    let sel = resolver::selection_from_ref_kind(ref_kind);
+    match git::resolve_selection(repo, &sel) {
+        std::result::Result::Ok(sha) => Ok(sha),
+        Err(e) if resolver::ref_kind_allows_head_fallback(ref_kind) => {
+            warn!(
+                "Failed to resolve selection: {:?}. Falling back to HEAD.",
+                e
+            );
+            Ok(git::get_latest_commit_sha(repo)?)
+        }
+        Err(e) => Err(e)
+            .with_context(|| format!("failed to resolve requested ref for repository {source}")),
+    }
+}
+
 fn add_plugins_to_config(
     config: &mut config::Config,
     config_path: &path::Path,
@@ -325,17 +345,7 @@ fn prepare_plugin_from_resolved(
         let commit_sha = if let Some(locked) = locked_plugin {
             if force {
                 if let Some(repo) = &repo {
-                    let sel = resolver::selection_from_ref_kind(&ref_kind);
-                    match git::resolve_selection(repo, &sel) {
-                        std::result::Result::Ok(sha) => sha,
-                        Err(e) => {
-                            warn!(
-                                "Failed to resolve selection: {:?}. Falling back to HEAD.",
-                                e
-                            );
-                            git::get_latest_commit_sha(repo)?
-                        }
-                    }
+                    resolve_install_commit(repo, &ref_kind, &source_base)?
                 } else {
                     "local".to_string()
                 }
@@ -366,17 +376,7 @@ fn prepare_plugin_from_resolved(
             let repo = repo
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("expected cloned repository for remote source"))?;
-            let sel = resolver::selection_from_ref_kind(&ref_kind);
-            let commit_sha = match git::resolve_selection(repo, &sel) {
-                std::result::Result::Ok(sha) => sha,
-                Err(e) => {
-                    warn!(
-                        "Failed to resolve selection: {:?}. Falling back to HEAD.",
-                        e
-                    );
-                    git::get_latest_commit_sha(repo)?
-                }
-            };
+            let commit_sha = resolve_install_commit(repo, &ref_kind, &source_base)?;
             if let Err(e) = git::checkout_commit(repo, &commit_sha) {
                 warn!("Failed to detach HEAD to {}: {:?}", &commit_sha, e);
             }
@@ -1207,6 +1207,35 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn clone_plugins_fails_when_explicit_selector_is_unresolved() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let remote_repo_path = temp_dir.path().join("owner").join("missing-selector");
+        let remote_url = format!("file://{}", remote_repo_path.display());
+        init_remote_repo(&remote_repo_path);
+
+        let mut resolved = InstallTarget::from_raw(remote_url.clone())
+            .resolve()
+            .unwrap();
+        resolved.ref_kind = resolver::RefKind::Branch("missing-branch".to_string());
+        let data_dir = temp_dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let err = clone_plugins(
+            &[resolved.clone()],
+            false,
+            crate::lock_file::init(),
+            &data_dir,
+        )
+        .await
+        .unwrap_err();
+        let err_text = format!("{:#}", err);
+
+        assert!(err_text.contains("failed to prepare plugin"));
+        assert!(err_text.contains("Branch not found: missing-branch"));
+        assert!(!data_dir.join(resolved.plugin_repo.as_str()).exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn clone_plugins_rolls_back_successful_remote_clones_when_another_target_fails() {
         let temp_dir = tempfile::tempdir().unwrap();
         let good_remote_repo_path = temp_dir.path().join("owner").join("good-repo");
@@ -1801,7 +1830,7 @@ mod tests {
     }
 
     #[test]
-    fn install_all_force_unresolvable_selector_falls_back_to_head() {
+    fn install_all_force_unresolvable_selector_fails() {
         let _log_lock = crate::tests_support::log::env_lock().lock().unwrap();
         let mut test_env = TestEnvironmentSetup::new();
         let _override = EnvOverride::new(&[
@@ -1819,7 +1848,7 @@ mod tests {
             .path()
             .join("owner")
             .join("force-missing-selector");
-        let (first_commit, head_commit) = init_remote_repo_with_two_commits(&remote_repo_path);
+        let (first_commit, _head_commit) = init_remote_repo_with_two_commits(&remote_repo_path);
         let remote_url = format!("file://{}", remote_repo_path.display());
 
         let plugin_repo = PluginRepo {
@@ -1867,14 +1896,11 @@ mod tests {
         let force = true;
         let prune = false;
         let result = install_all(&force, &prune);
-        assert!(
-            result.is_ok(),
-            "install_all should succeed and fall back to HEAD when selector cannot be resolved"
-        );
+        let err_text = format!("{:#}", result.unwrap_err());
+        assert!(err_text.contains("missing-branch"), "{err_text}");
 
         let saved_lock = crate::lock_file::load(&test_env.lock_file_path).unwrap();
-        let updated_plugin = saved_lock.get_plugin_by_repo(&plugin_repo).unwrap();
-        assert_eq!(updated_plugin.commit_sha, head_commit);
-        assert_ne!(updated_plugin.commit_sha, first_commit);
+        let locked_plugin = saved_lock.get_plugin_by_repo(&plugin_repo).unwrap();
+        assert_eq!(locked_plugin.commit_sha, first_commit);
     }
 }

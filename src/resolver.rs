@@ -52,6 +52,10 @@ pub(crate) fn selection_from_ref_kind(kind: &RefKind) -> Selection {
     }
 }
 
+pub(crate) fn ref_kind_allows_head_fallback(kind: &RefKind) -> bool {
+    matches!(kind, RefKind::None | RefKind::Latest)
+}
+
 pub(crate) fn ref_kind_to_repo_source(repo: &PluginRepo, kind: &RefKind) -> PluginSource {
     match kind {
         RefKind::None => PluginSource::Repo {
@@ -187,5 +191,21 @@ mod tests {
             Selection::Version(v) => assert_eq!(v, "v3"),
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn only_default_and_latest_allow_head_fallback() {
+        assert!(ref_kind_allows_head_fallback(&RefKind::None));
+        assert!(ref_kind_allows_head_fallback(&RefKind::Latest));
+        assert!(!ref_kind_allows_head_fallback(&RefKind::Version(
+            "v1".into()
+        )));
+        assert!(!ref_kind_allows_head_fallback(&RefKind::Branch(
+            "main".into()
+        )));
+        assert!(!ref_kind_allows_head_fallback(&RefKind::Tag("v1".into())));
+        assert!(!ref_kind_allows_head_fallback(&RefKind::Commit(
+            "abc123".into()
+        )));
     }
 }
