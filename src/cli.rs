@@ -16,7 +16,7 @@ fn parse_jobs_override(raw: &str) -> Result<usize, String> {
 #[derive(Parser, Debug)]
 #[command(name = "pez", version, about, long_about = None)]
 pub(crate) struct Cli {
-    /// Increase output verbosity (-v for info, -vv for debug)
+    /// Log verbosity flag (default info; -vv enables debug)
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub(crate) verbose: u8,
 

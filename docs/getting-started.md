@@ -114,5 +114,5 @@ end
 | Diagnose setup state | `pez doctor` |
 | Remove lockfile-only plugins | `pez prune --dry-run` |
 
-Use `-v` for info logs and `-vv` for debug logs. Use `--jobs <N>` to override
+Logs default to info. Use `-vv` for debug logs. Use `--jobs <N>` to override
 parallel work where the command supports it.
