@@ -24,12 +24,15 @@ and dispatches each command through `src/cmd/`.
 3. Clone remote repos into the pez data directory. Local path sources skip clone.
 4. Resolve the selected revision.
 5. Copy supported fish assets into the target fish config directory.
-6. Apply run-level duplicate destination checks while copying files.
-7. Write installed state and copied file records to `pez-lock.toml`.
-8. Emit hook events for eligible `conf.d` files.
+6. Apply run-level duplicate destination checks on dedupe-enabled install paths.
+7. For raw commands, emit out-of-process hook events for eligible `conf.d`
+   files unless `PEZ_SUPPRESS_EMIT=1` is set.
+8. Write installed state and copied file records to `pez-lock.toml`.
 
 Explicit CLI installs clone concurrently and then copy files sequentially.
-Config-driven installs are sequential.
+Config-driven installs are sequential. Fresh config-driven entries use direct
+copying; explicit CLI installs and config-driven entries that copy an already
+tracked plugin use dedupe-enabled copying.
 
 ## Upgrade Flow
 
@@ -63,12 +66,16 @@ Environment overrides are documented in [configuration](configuration.md).
 
 pez has two hook paths:
 
-- Raw commands emit eligible events out of process.
+- Raw commands emit eligible events out of process. Raw `install` emits before
+  the lockfile write; raw `upgrade` and `uninstall` emit after state updates
+  succeed.
 - `pez activate fish | source` installs a fish wrapper so hooks run in the
   current shell.
 
 The activation wrapper suppresses duplicate raw emits by setting
-`PEZ_SUPPRESS_EMIT=1`.
+`PEZ_SUPPRESS_EMIT=1`. It emits install and upgrade hooks in the current shell
+after the raw command succeeds, and emits uninstall hooks before the raw
+uninstall command while recorded files still exist.
 
 ## Documentation Boundaries
 

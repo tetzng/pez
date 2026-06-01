@@ -67,12 +67,15 @@ Install behavior:
 - CLI relative paths and `~/` paths are normalized before they are saved.
 - Explicit remote targets clone concurrently, bounded by `--jobs` or `PEZ_JOBS`.
 - Config-driven installs run sequentially.
-- File copying is sequential so run-level duplicate destinations can be
-  detected consistently.
-- If two plugins would copy to the same destination in one run, pez warns and
-  skips the later plugin's file copies. `pez-lock.toml` records only copied
-  files, so a fully skipped plugin can remain as an installed entry with an
-  empty `files` list.
+- File copying is sequential for explicit CLI installs and for config-driven
+  installs when they copy a plugin already tracked in `pez-lock.toml`, so those
+  paths can detect run-level duplicate destinations consistently.
+- When that dedupe path finds a destination already claimed in the same run,
+  pez warns and skips the later plugin's file copies. `pez-lock.toml` records
+  only copied files, so a fully skipped plugin can remain as an installed entry
+  with an empty `files` list.
+- Fresh config-driven plugin entries are copied directly. Run `pez doctor`
+  after config-driven installs to inspect duplicate destination issues.
 
 ## uninstall
 

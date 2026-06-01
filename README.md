@@ -13,7 +13,7 @@ result with `pez doctor` before removing another plugin manager.
 
 - Lockfile state for installed commits and copied files
 - GitHub shorthand, host-prefixed repos, full Git URLs, and local plugin paths
-- Run-level duplicate destination checks for copied plugin files
+- `doctor` checks for missing files, duplicate destinations, and theme assets
 - `doctor`, `files`, `list --outdated`, `upgrade`, and `prune` commands for routine maintenance
 - A guided migration path from fisher
 

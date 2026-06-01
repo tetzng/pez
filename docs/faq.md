@@ -37,9 +37,13 @@ Check whether the plugin has a selector in `pez.toml`.
 
 ## How are duplicate files handled?
 
-If two plugins would write the same destination path in one run, pez skips the
-later plugin's file copies. The plugin can still appear in `pez-lock.toml`;
-only copied files are recorded, so that entry may have an empty `files` list.
+Explicit CLI installs, and config-driven installs when they copy a plugin
+already tracked in `pez-lock.toml`, check duplicate destinations within the
+current run. If a later plugin would write a claimed path, pez skips that
+plugin's file copies. The plugin can still appear in `pez-lock.toml`; only
+copied files are recorded, so that entry may have an empty `files` list.
+
+Fresh config-driven entries are copied directly.
 
 Use `pez doctor` to inspect duplicate destination issues.
 
