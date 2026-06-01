@@ -24,7 +24,7 @@ This document outlines the high‑level structure and flows in pez.
 4. Resolve the commit using `resolver::RefKind` -> `git::resolve_selection`.
 5. Copy files to the Fish config directory using `utils::copy_plugin_files*`.
 6. Update the lockfile with `name`/`repo`/`source`/`commit_sha`/`files`.
-7. For files under `conf.d` with safe stems, emit `<stem>_{install|update|uninstall}` fish events.
+7. For files under `conf.d` with safe stems, emit `<stem>_{install|update|uninstall}` fish events at the command-specific hook point; raw uninstall emits run after cleanup and state updates succeed.
 
 ## Concurrency
 

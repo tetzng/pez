@@ -118,7 +118,7 @@ Notes
 - It copies files recursively into the matching Fish config directories, preserving relative paths.
 - Only `.fish` files are copied from `functions`/`completions`/`conf.d`, and only `.theme` files from `themes`.
 - If two plugins would write the same destination path in a single run, the later plugin is skipped and its files are not recorded in the lockfile.
-- For `conf.d` files with safe stems (`A-Z`, `a-z`, `0-9`, `_`, `-`, or `.`), pez emits `<stem>_{install|update|uninstall}` after installs/upgrades or before uninstalls (unless `PEZ_SUPPRESS_EMIT` is set).
+- For `conf.d` files with safe stems (`A-Z`, `a-z`, `0-9`, `_`, `-`, or `.`), pez emits out-of-process `<stem>_{install|update|uninstall}` events unless `PEZ_SUPPRESS_EMIT` is set. Raw uninstall emits run only after cleanup and state updates succeed; the activation wrapper sources and emits uninstall hooks before running `pez uninstall` in the current shell.
 
 ## Environment Variables and CLI Overrides
 

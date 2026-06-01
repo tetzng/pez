@@ -6,7 +6,7 @@ use crate::{
 };
 use console::Emoji;
 use futures::{StreamExt, stream};
-use std::{fs, io, path};
+use std::{io, path};
 use tracing::{info, warn};
 
 struct PruneContext<'a> {
@@ -126,9 +126,12 @@ where
 
     for plugin in remove_plugins {
         let repo_path = ctx.data_dir.join(plugin.repo.as_str());
-        if repo_path.exists() {
-            fs::remove_dir_all(&repo_path)?;
-        } else {
+        let file_paths: Vec<_> = plugin
+            .files
+            .iter()
+            .map(|file| file.get_path(ctx.fish_config_dir))
+            .collect();
+        if !repo_path.exists() {
             let path_display = repo_path.display();
             warn!(
                 "{} {} Repository directory at {} does not exist.",
@@ -143,31 +146,29 @@ where
                     Emoji("📄 ", ""),
                 );
 
-                plugin.files.iter().for_each(|file| {
-                    let dest_path = file.get_path(ctx.fish_config_dir);
-                    info!("   - {}", dest_path.display());
-                });
+                file_paths
+                    .iter()
+                    .for_each(|dest_path| info!("   - {}", dest_path.display()));
                 info!("If you want to remove these files, use the --force flag.");
                 continue;
             }
         }
 
+        let staged_file_removals = utils::stage_files_for_removal(&file_paths)?;
+        let staged_repo_removals = utils::stage_dirs_for_removal(std::slice::from_ref(&repo_path))?;
+
         info!(
             "{}Removing plugin files based on pez-lock.toml:",
             Emoji("🗑️  ", ""),
         );
-        plugin.files.iter().for_each(|file| {
-            let dest_path = file.get_path(ctx.fish_config_dir);
-            if dest_path.exists() {
-                let path_display = dest_path.display();
-                info!("   - {}", path_display);
-                if let Err(e) = fs::remove_file(&dest_path) {
-                    warn!("Failed to remove {}: {:?}", path_display, e);
-                }
-            }
-        });
+        for dest_path in staged_file_removals.removed_paths() {
+            info!("   - {}", dest_path.display());
+        }
+
         ctx.lock_file.remove_plugin(&plugin.source);
         ctx.lock_file.save(ctx.lock_file_path)?;
+        staged_file_removals.commit();
+        staged_repo_removals.commit();
     }
     info!(
         "\n{}All uninstalled plugins have been pruned successfully!",
@@ -228,9 +229,12 @@ where
             let data_dir = data_dir.clone();
             async move {
                 let repo_path = data_dir.join(plugin.repo.as_str());
-                if repo_path.exists() {
-                    tokio::task::spawn_blocking(move || fs::remove_dir_all(&repo_path)).await??;
-                } else {
+                let file_paths: Vec<_> = plugin
+                    .files
+                    .iter()
+                    .map(|file| file.get_path(&fish_config_dir))
+                    .collect();
+                if !repo_path.exists() {
                     let path_display = repo_path.display();
                     warn!(
                         "{} {} Repository directory at {} does not exist.",
@@ -248,35 +252,48 @@ where
                                 fish_config_dir.join(file.dir.as_str()).join(&file.name);
                             info!("   - {}", dest_path.display());
                         }
-                        return Ok::<Option<String>, anyhow::Error>(None);
+                        return Ok::<
+                            Option<(String, utils::StagedFileRemovals, utils::StagedDirRemovals)>,
+                            anyhow::Error,
+                        >(None);
                     }
                 }
+
+                let (staged_file_removals, staged_repo_removals) =
+                    tokio::task::spawn_blocking(move || {
+                        let staged_file_removals = utils::stage_files_for_removal(&file_paths)?;
+                        let staged_repo_removals =
+                            utils::stage_dirs_for_removal(std::slice::from_ref(&repo_path))?;
+                        Ok::<_, anyhow::Error>((staged_file_removals, staged_repo_removals))
+                    })
+                    .await??;
 
                 info!(
                     "{}Removing plugin files based on pez-lock.toml:",
                     Emoji("🗑️  ", ""),
                 );
-                for file in &plugin.files {
-                    let dest_path = fish_config_dir.join(file.dir.as_str()).join(&file.name);
-                    if dest_path.exists() {
-                        let to_delete = dest_path.clone();
-                        let _ = tokio::task::spawn_blocking(move || fs::remove_file(&to_delete))
-                            .await
-                            .map_err(|e| anyhow::anyhow!(e))
-                            .and_then(|res| res.map_err(|e| anyhow::anyhow!(e)));
-                    }
+                for dest_path in staged_file_removals.removed_paths() {
+                    info!("   - {}", dest_path.display());
                 }
 
-                Ok(Some(plugin.source.clone()))
+                Ok(Some((
+                    plugin.source.clone(),
+                    staged_file_removals,
+                    staged_repo_removals,
+                )))
             }
         })
         .buffer_unordered(jobs);
 
     let mut sources_to_remove: Vec<String> = Vec::new();
+    let mut staged_file_removals = Vec::new();
+    let mut staged_repo_removals = Vec::new();
     futures::pin_mut!(tasks);
     while let Some(res) = tasks.next().await {
-        if let Some(source) = res? {
+        if let Some((source, file_removals, repo_removals)) = res? {
             sources_to_remove.push(source);
+            staged_file_removals.push(file_removals);
+            staged_repo_removals.push(repo_removals);
         }
     }
 
@@ -285,6 +302,12 @@ where
             .plugins
             .retain(|p| !sources_to_remove.contains(&p.source));
         ctx.lock_file.save(ctx.lock_file_path)?;
+        for removals in staged_file_removals {
+            removals.commit();
+        }
+        for removals in staged_repo_removals {
+            removals.commit();
+        }
     }
 
     info!(
@@ -411,7 +434,7 @@ impl Drop for ConfirmInputGuard {
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsString, future::Future, vec};
+    use std::{ffi::OsString, fs, future::Future, vec};
 
     use super::*;
     use crate::tests_support::log::{capture_logs, env_lock};
@@ -422,6 +445,8 @@ mod tests {
         tests_support::env::TestEnvironmentSetup,
     };
     use config::{PluginSource, PluginSpec};
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     struct EnvOverride {
         keys: Vec<&'static str>,
@@ -787,6 +812,95 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn prune_preserves_repo_when_plugin_file_removal_fails() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        let unused_repo = test_data.unused_plugin.repo.clone();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+
+        let blocked_path = test_env
+            .fish_config_dir
+            .join(TargetDir::Functions.as_str())
+            .join("unused.fish");
+        std::fs::create_dir_all(blocked_path.parent().unwrap()).unwrap();
+        std::fs::write(&blocked_path, "echo blocked\n").unwrap();
+        let functions_dir = blocked_path.parent().unwrap();
+        let original_perms = std::fs::metadata(functions_dir).unwrap().permissions();
+        let mut read_only_perms = original_perms.clone();
+        read_only_perms.set_mode(0o500);
+        std::fs::set_permissions(functions_dir, read_only_perms).unwrap();
+
+        let mut ctx = test_env.create_context();
+
+        let err = prune(true, false, || Ok(false), &mut ctx)
+            .expect_err("file removal failure should abort prune");
+        std::fs::set_permissions(functions_dir, original_perms).unwrap();
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Failed to remove"), "{err_text}");
+
+        let lock_file = lock_file::load(ctx.lock_file_path).unwrap();
+        assert!(lock_file.get_plugin_by_repo(&unused_repo).is_some());
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/unused-repo")).is_ok(),
+            "Unused repo directory should remain when file deletion is rejected"
+        );
+        assert!(blocked_path.is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prune_preserves_repo_when_lock_save_fails() {
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        let unused_repo = test_data.unused_plugin.repo.clone();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+        test_env.setup_fish_config();
+
+        let plugin_file = test_env
+            .fish_config_dir
+            .join(TargetDir::Functions.as_str())
+            .join("unused.fish");
+        let repo_path = test_env.data_dir.join(unused_repo.as_str());
+        let mut ctx = test_env.create_context();
+        let original_perms = std::fs::metadata(ctx.lock_file_path).unwrap().permissions();
+        let mut read_only_perms = original_perms.clone();
+        read_only_perms.set_mode(0o400);
+        std::fs::set_permissions(ctx.lock_file_path, read_only_perms).unwrap();
+
+        let err = prune(true, false, || Ok(false), &mut ctx)
+            .expect_err("lock save failure should abort prune");
+        std::fs::set_permissions(ctx.lock_file_path, original_perms).unwrap();
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Permission denied"), "{err_text}");
+
+        let saved = lock_file::load(ctx.lock_file_path).unwrap();
+        assert!(saved.get_plugin_by_repo(&unused_repo).is_some());
+        assert!(
+            repo_path.exists(),
+            "unused repo directory should remain when lock save fails"
+        );
+        assert!(
+            plugin_file.exists(),
+            "staged plugin files should be restored when lock save fails"
+        );
+    }
+
     #[test]
     fn test_prune_empty_config_missing_data_dir_without_force() {
         let mut test_env = TestEnvironmentSetup::new();
@@ -845,6 +959,98 @@ mod tests {
         assert!(
             fs::metadata(test_env.fish_config_dir.join("functions/used.fish")).is_ok(),
             "Used plugin file should still exist"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prune_parallel_preserves_lock_when_plugin_file_removal_fails() {
+        let _jobs = JobsGuard::set(1);
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        let unused_repo = test_data.unused_plugin.repo.clone();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+
+        let blocked_path = test_env
+            .fish_config_dir
+            .join(TargetDir::Functions.as_str())
+            .join("unused.fish");
+        std::fs::create_dir_all(blocked_path.parent().unwrap()).unwrap();
+        std::fs::write(&blocked_path, "echo blocked\n").unwrap();
+        let functions_dir = blocked_path.parent().unwrap();
+        let original_perms = std::fs::metadata(functions_dir).unwrap().permissions();
+        let mut read_only_perms = original_perms.clone();
+        read_only_perms.set_mode(0o500);
+        std::fs::set_permissions(functions_dir, read_only_perms).unwrap();
+
+        let mut ctx = test_env.create_context();
+        let err = prune_parallel_with_confirm(true, true, &mut ctx, || Ok(true))
+            .await
+            .expect_err("file removal failure should abort prune");
+        std::fs::set_permissions(functions_dir, original_perms).unwrap();
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Failed to remove"), "{err_text}");
+
+        let saved = lock_file::load(ctx.lock_file_path).unwrap();
+        assert!(saved.get_plugin_by_repo(&unused_repo).is_some());
+        assert!(blocked_path.is_file());
+        assert!(
+            fs::metadata(ctx.data_dir.join("owner/unused-repo")).is_ok(),
+            "Unused repo directory should remain when file deletion is rejected"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prune_parallel_preserves_repo_when_lock_save_fails() {
+        let _jobs = JobsGuard::set(1);
+        let mut test_env = TestEnvironmentSetup::new();
+        let test_data = TestDataBuilder::new().build();
+        let unused_repo = test_data.unused_plugin.repo.clone();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![test_data.used_plugin_spec]),
+        });
+        test_env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![test_data.used_plugin, test_data.unused_plugin],
+        });
+        test_env.setup_data_repo(test_env.lock_file.as_ref().unwrap().get_plugin_repos());
+        test_env.setup_fish_config();
+
+        let plugin_file = test_env
+            .fish_config_dir
+            .join(TargetDir::Functions.as_str())
+            .join("unused.fish");
+        let repo_path = test_env.data_dir.join(unused_repo.as_str());
+        let mut ctx = test_env.create_context();
+        let original_perms = std::fs::metadata(ctx.lock_file_path).unwrap().permissions();
+        let mut read_only_perms = original_perms.clone();
+        read_only_perms.set_mode(0o400);
+        std::fs::set_permissions(ctx.lock_file_path, read_only_perms).unwrap();
+
+        let err = prune_parallel_with_confirm(true, true, &mut ctx, || Ok(true))
+            .await
+            .expect_err("lock save failure should abort prune");
+        std::fs::set_permissions(ctx.lock_file_path, original_perms).unwrap();
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Permission denied"), "{err_text}");
+
+        let saved = lock_file::load(ctx.lock_file_path).unwrap();
+        assert!(saved.get_plugin_by_repo(&unused_repo).is_some());
+        assert!(
+            repo_path.exists(),
+            "unused repo directory should remain when lock save fails"
+        );
+        assert!(
+            plugin_file.exists(),
+            "staged plugin files should be restored when lock save fails"
         );
     }
 

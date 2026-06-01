@@ -7,8 +7,13 @@ use anyhow::Context;
 use console::Emoji;
 use std::{
     collections::HashSet,
-    env, fmt, fs, path,
-    sync::{Mutex, OnceLock},
+    env,
+    ffi::OsString,
+    fmt, fs, io, path, process,
+    sync::{
+        Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
@@ -172,6 +177,280 @@ pub(crate) fn copy_plugin_files_from_repo(
         warn_no_plugin_files();
     }
     Ok(())
+}
+
+pub(crate) fn remove_file_if_exists(path: &path::Path) -> anyhow::Result<bool> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("Failed to remove {}", path.display())),
+    }
+}
+
+pub(crate) fn remove_dir_all_if_exists(path: &path::Path) -> anyhow::Result<bool> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => {
+            Err(err).with_context(|| format!("Failed to remove directory {}", path.display()))
+        }
+    }
+}
+
+pub(crate) fn ensure_file_removable_if_exists(path: &path::Path) -> anyhow::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_file() || file_type.is_symlink() {
+                Ok(true)
+            } else {
+                anyhow::bail!(
+                    "Failed to remove {}: path is not a file or symlink",
+                    path.display()
+                );
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("Failed to inspect {}", path.display())),
+    }
+}
+
+fn ensure_dir_removable_if_exists(path: &path::Path) -> anyhow::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_dir() {
+                Ok(true)
+            } else {
+                anyhow::bail!(
+                    "Failed to remove directory {}: path is not a directory",
+                    path.display()
+                );
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("Failed to inspect {}", path.display())),
+    }
+}
+
+pub(crate) struct StagedFileRemovals {
+    entries: Vec<StagedRemovalEntry>,
+    committed: bool,
+}
+
+pub(crate) struct StagedDirRemovals {
+    entries: Vec<StagedRemovalEntry>,
+    committed: bool,
+}
+
+struct StagedRemovalEntry {
+    original: path::PathBuf,
+    staged: path::PathBuf,
+}
+
+impl StagedFileRemovals {
+    pub(crate) fn removed_paths(&self) -> impl Iterator<Item = &path::Path> {
+        self.entries.iter().map(|entry| entry.original.as_path())
+    }
+
+    pub(crate) fn commit(mut self) {
+        self.committed = true;
+        for entry in &self.entries {
+            if let Err(err) = remove_file_if_exists(&entry.staged) {
+                warn!(
+                    "Failed to clean staged removal {}: {:?}",
+                    entry.staged.display(),
+                    err
+                );
+            }
+        }
+    }
+}
+
+impl StagedDirRemovals {
+    pub(crate) fn commit(mut self) {
+        self.committed = true;
+        for entry in &self.entries {
+            if let Err(err) = remove_dir_all_if_exists(&entry.staged) {
+                warn!(
+                    "Failed to clean staged directory removal {}: {:?}",
+                    entry.staged.display(),
+                    err
+                );
+            }
+        }
+    }
+}
+
+impl Drop for StagedFileRemovals {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+
+        for entry in self.entries.iter().rev() {
+            if !path_exists(&entry.staged) {
+                continue;
+            }
+
+            if path_exists(&entry.original)
+                && let Err(err) = remove_file_if_exists(&entry.original)
+            {
+                warn!(
+                    "Failed to restore {} from staged removal {}: {:?}",
+                    entry.original.display(),
+                    entry.staged.display(),
+                    err
+                );
+                continue;
+            }
+
+            if let Err(err) = fs::rename(&entry.staged, &entry.original) {
+                warn!(
+                    "Failed to restore {} from staged removal {}: {:?}",
+                    entry.original.display(),
+                    entry.staged.display(),
+                    err
+                );
+            }
+        }
+    }
+}
+
+impl Drop for StagedDirRemovals {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+
+        for entry in self.entries.iter().rev() {
+            if !path_exists(&entry.staged) {
+                continue;
+            }
+
+            if path_exists(&entry.original)
+                && let Err(err) = remove_dir_all_if_exists(&entry.original)
+            {
+                warn!(
+                    "Failed to restore directory {} from staged removal {}: {:?}",
+                    entry.original.display(),
+                    entry.staged.display(),
+                    err
+                );
+                continue;
+            }
+
+            if let Err(err) = fs::rename(&entry.staged, &entry.original) {
+                warn!(
+                    "Failed to restore directory {} from staged removal {}: {:?}",
+                    entry.original.display(),
+                    entry.staged.display(),
+                    err
+                );
+            }
+        }
+    }
+}
+
+pub(crate) fn stage_files_for_removal(
+    paths: &[path::PathBuf],
+) -> anyhow::Result<StagedFileRemovals> {
+    let mut staged_removals = StagedFileRemovals {
+        entries: Vec::new(),
+        committed: false,
+    };
+    for (index, path) in paths.iter().enumerate() {
+        if !ensure_file_removable_if_exists(path)? {
+            continue;
+        }
+
+        let staged = unique_staged_removal_path(path, index)?;
+        match fs::rename(path, &staged) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(err).with_context(|| format!("Failed to remove {}", path.display()));
+            }
+        }
+        staged_removals.entries.push(StagedRemovalEntry {
+            original: path.clone(),
+            staged,
+        });
+    }
+
+    Ok(staged_removals)
+}
+
+pub(crate) fn stage_dirs_for_removal(paths: &[path::PathBuf]) -> anyhow::Result<StagedDirRemovals> {
+    let mut staged_removals = StagedDirRemovals {
+        entries: Vec::new(),
+        committed: false,
+    };
+    for (index, path) in paths.iter().enumerate() {
+        if !ensure_dir_removable_if_exists(path)? {
+            continue;
+        }
+
+        let staged = unique_staged_removal_path(path, index)?;
+        match fs::rename(path, &staged) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("Failed to remove directory {}", path.display()));
+            }
+        }
+        staged_removals.entries.push(StagedRemovalEntry {
+            original: path.clone(),
+            staged,
+        });
+    }
+
+    Ok(staged_removals)
+}
+
+fn unique_staged_removal_path(path: &path::Path, index: usize) -> anyhow::Result<path::PathBuf> {
+    static NEXT_STAGED_REMOVAL_ID: AtomicU64 = AtomicU64::new(0);
+
+    let parent = path
+        .parent()
+        .with_context(|| format!("Failed to remove {}: path has no parent", path.display()))?;
+    let file_name = path
+        .file_name()
+        .with_context(|| format!("Failed to remove {}: path has no file name", path.display()))?;
+    let removal_id = NEXT_STAGED_REMOVAL_ID.fetch_add(1, Ordering::Relaxed);
+
+    for attempt in 0..1000 {
+        let mut staged_name = OsString::from(".pez-removing-");
+        staged_name.push(process::id().to_string());
+        staged_name.push("-");
+        staged_name.push(removal_id.to_string());
+        staged_name.push("-");
+        staged_name.push(index.to_string());
+        staged_name.push("-");
+        staged_name.push(attempt.to_string());
+        staged_name.push("-");
+        staged_name.push(file_name);
+        let candidate = parent.join(staged_name);
+        if !path_exists(&candidate) {
+            return Ok(candidate);
+        }
+    }
+
+    anyhow::bail!(
+        "Failed to remove {}: no staging path available",
+        path.display()
+    );
+}
+
+fn path_exists(path: &path::Path) -> bool {
+    match fs::symlink_metadata(path) {
+        Ok(_) => true,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => false,
+        Err(err) => {
+            warn!("Failed to inspect {}: {:?}", path.display(), err);
+            true
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -589,6 +868,55 @@ mod tests {
             std::env::remove_var("PEZ_JOBS");
         }
         assert_eq!(load_jobs(), 4);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_exists_treats_metadata_errors_as_existing() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let restricted_dir = temp.path().join("restricted");
+        std::fs::create_dir_all(&restricted_dir).unwrap();
+        let path = restricted_dir.join("maybe-existing");
+        let original_perms = std::fs::metadata(&restricted_dir).unwrap().permissions();
+        let mut restricted_perms = original_perms.clone();
+        restricted_perms.set_mode(0o000);
+        std::fs::set_permissions(&restricted_dir, restricted_perms).unwrap();
+
+        let exists = path_exists(&path);
+
+        std::fs::set_permissions(&restricted_dir, original_perms).unwrap();
+        assert!(
+            exists,
+            "metadata errors should be treated as existing to avoid overwriting or skipping restore"
+        );
+    }
+
+    #[test]
+    fn stage_files_for_removal_skips_missing_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("plugin.fish");
+        std::fs::write(&path, "plugin").unwrap();
+
+        let staged =
+            stage_files_for_removal(&[path.clone(), path.clone()]).expect("stage should succeed");
+
+        assert_eq!(staged.removed_paths().count(), 1);
+        assert!(!path.exists());
+        drop(staged);
+        assert!(path.is_file());
+    }
+
+    #[test]
+    fn unique_staged_removal_path_returns_distinct_candidates_for_same_input() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("plugin.fish");
+
+        let first = unique_staged_removal_path(&path, 0).unwrap();
+        let second = unique_staged_removal_path(&path, 0).unwrap();
+
+        assert_ne!(first, second);
     }
 
     #[test]

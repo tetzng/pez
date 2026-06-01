@@ -9,7 +9,6 @@ use crate::{
 use anyhow::Context;
 use console::Emoji;
 use futures::{StreamExt, stream};
-use std::fs;
 use tracing::{error, info, warn};
 
 pub(crate) async fn run(args: &UpgradeArgs) -> anyhow::Result<()> {
@@ -147,16 +146,18 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                     return Ok(());
                 }
 
-                git::checkout_commit(&repo, &latest_remote_commit)?;
+                let original_commit = lock_file_plugin.commit_sha.clone();
+                let old_file_paths: Vec<_> = lock_file_plugin
+                    .files
+                    .iter()
+                    .map(|file| file.get_path(&config_dir))
+                    .collect();
+                let staged_removals = utils::stage_files_for_removal(&old_file_paths)?;
 
-                lock_file_plugin.files.iter().for_each(|file| {
-                    let dest_path = config_dir.join(file.dir.as_str()).join(&file.name);
-                    if dest_path.exists()
-                        && let Err(e) = fs::remove_file(&dest_path)
-                    {
-                        warn!("Failed to remove {}: {:?}", dest_path.display(), e);
-                    }
-                });
+                for dest_path in staged_removals.removed_paths() {
+                    info!("   - {}", dest_path.display());
+                }
+                git::checkout_commit(&repo, &latest_remote_commit)?;
                 let mut updated_plugin = Plugin {
                     name: lock_file_plugin.name.to_string(),
                     repo: plugin_repo.clone(),
@@ -166,22 +167,68 @@ fn upgrade_plugin(plugin_repo: &PluginRepo) -> anyhow::Result<()> {
                 };
                 info!("{:?}", updated_plugin);
 
-                utils::copy_plugin_files_from_repo(&repo_path, &mut updated_plugin)?;
+                if let Err(err) =
+                    utils::copy_plugin_files_from_repo(&repo_path, &mut updated_plugin)
+                {
+                    for file in &updated_plugin.files {
+                        let path = file.get_path(&config_dir);
+                        if let Err(cleanup_err) = utils::remove_file_if_exists(&path) {
+                            warn!(
+                                "Failed to clean copied file {} after failed upgrade: {:?}",
+                                path.display(),
+                                cleanup_err
+                            );
+                        }
+                    }
+                    if let Err(restore_err) = git::checkout_commit(&repo, &original_commit) {
+                        warn!(
+                            "Failed to restore repo checkout for {} to {} after failed upgrade: {:?}",
+                            plugin_repo, original_commit, restore_err
+                        );
+                    }
+                    return Err(err);
+                }
 
-                updated_plugin
+                let copied_file_paths: Vec<_> = updated_plugin
+                    .files
+                    .iter()
+                    .map(|file| file.get_path(&config_dir))
+                    .collect();
+                let update_event_names: Vec<_> = updated_plugin
                     .files
                     .iter()
                     .filter(|f| f.dir == TargetDir::ConfD)
-                    .for_each(|f| {
-                        if let Err(e) = utils::emit_event(&f.name, &utils::Event::Update) {
-                            error!("Failed to emit event for {}: {:?}", &f.name, e);
-                        }
-                    });
+                    .map(|f| f.name.clone())
+                    .collect();
 
-                if let Err(e) = lock_file.upsert_plugin_by_repo(updated_plugin) {
-                    warn!("Failed to update lock file: {:?}", e);
+                if let Err(err) = lock_file
+                    .upsert_plugin_by_repo(updated_plugin)
+                    .and_then(|()| lock_file.save(&lock_file_path))
+                {
+                    for path in &copied_file_paths {
+                        if let Err(cleanup_err) = utils::remove_file_if_exists(path) {
+                            warn!(
+                                "Failed to clean copied file {} after failed upgrade: {:?}",
+                                path.display(),
+                                cleanup_err
+                            );
+                        }
+                    }
+                    if let Err(restore_err) = git::checkout_commit(&repo, &original_commit) {
+                        warn!(
+                            "Failed to restore repo checkout for {} to {} after failed upgrade: {:?}",
+                            plugin_repo, original_commit, restore_err
+                        );
+                    }
+                    return Err(err);
                 }
-                lock_file.save(&lock_file_path)?;
+                staged_removals.commit();
+
+                for name in update_event_names {
+                    if let Err(e) = utils::emit_event(&name, &utils::Event::Update) {
+                        error!("Failed to emit event for {}: {:?}", name, e);
+                    }
+                }
             } else {
                 let path_display = repo_path.display();
                 warn!(
@@ -671,6 +718,144 @@ mod tests {
             .join(TargetDir::Functions.as_str())
             .join("beta.fish");
         assert!(!beta_path.exists());
+    }
+
+    #[test]
+    fn upgrade_plugin_preserves_lock_when_old_file_removal_fails() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        crate::utils::clear_cli_jobs_override_for_tests();
+        let fixture = UpgradeFixture::new(false);
+        let _override = EnvOverride::new(&[
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+        ]);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+            std::env::set_var("__fish_config_dir", &fixture.env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &fixture.env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &fixture.env.data_dir);
+        }
+
+        fixture.env.setup_fish_config();
+        let alpha_path = fixture
+            .env
+            .fish_config_dir
+            .join(TargetDir::ConfD.as_str())
+            .join("alpha.fish");
+        assert!(alpha_path.exists());
+        let beta_path = fixture
+            .env
+            .fish_config_dir
+            .join(TargetDir::Functions.as_str())
+            .join("beta.fish");
+        let functions_dir = beta_path.parent().unwrap();
+        let original_perms = std::fs::metadata(functions_dir).unwrap().permissions();
+        let mut read_only_perms = original_perms.clone();
+        read_only_perms.set_mode(0o500);
+        std::fs::set_permissions(functions_dir, read_only_perms).unwrap();
+
+        let repo_path = fixture.env.data_dir.join(fixture.repo.as_str());
+        let repo = git2::Repository::open(&repo_path).unwrap();
+        crate::git::checkout_commit(&repo, &fixture.first_commit).unwrap();
+
+        let err =
+            upgrade_plugin(&fixture.repo).expect_err("file removal failure should abort upgrade");
+        std::fs::set_permissions(functions_dir, original_perms).unwrap();
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Failed to remove"), "{err_text}");
+
+        let saved_lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
+        let saved_plugin = saved_lock.get_plugin_by_repo(&fixture.repo).unwrap();
+        assert_eq!(saved_plugin.commit_sha, fixture.first_commit);
+        assert!(
+            saved_plugin
+                .files
+                .iter()
+                .any(|file| file.dir == TargetDir::Functions && file.name == "beta.fish")
+        );
+        assert!(
+            alpha_path.exists(),
+            "earlier removable files should remain when another file is rejected"
+        );
+        assert!(beta_path.is_file());
+        assert_eq!(
+            crate::git::get_latest_commit_sha(&repo).unwrap(),
+            fixture.first_commit,
+            "repo checkout should not advance when old file removal is rejected"
+        );
+    }
+
+    #[test]
+    fn upgrade_plugin_rolls_back_when_lock_upsert_fails() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        crate::utils::clear_cli_jobs_override_for_tests();
+        let mut fixture = UpgradeFixture::new(false);
+        let _override = EnvOverride::new(&[
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+        ]);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+            std::env::set_var("__fish_config_dir", &fixture.env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &fixture.env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &fixture.env.data_dir);
+        }
+
+        let conflict_repo = PluginRepo {
+            host: None,
+            owner: "owner".into(),
+            repo: "conflict".into(),
+        };
+        let mut lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
+        lock.plugins.push(crate::lock_file::Plugin {
+            name: "upgrade".into(),
+            repo: conflict_repo.clone(),
+            source: "https://example.com/owner/conflict".into(),
+            commit_sha: fixture.first_commit.clone(),
+            files: vec![],
+        });
+        fixture.env.setup_lock_file(lock);
+        fixture.env.setup_fish_config();
+
+        let repo_path = fixture.env.data_dir.join(fixture.repo.as_str());
+        let repo = git2::Repository::open(&repo_path).unwrap();
+        crate::git::checkout_commit(&repo, &fixture.first_commit).unwrap();
+
+        let err = upgrade_plugin(&fixture.repo).expect_err("lock upsert failure should abort");
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Plugin already exists"), "{err_text}");
+
+        let saved_lock = lock_file::load(&fixture.env.lock_file_path).unwrap();
+        let saved_plugin = saved_lock.get_plugin_by_repo(&fixture.repo).unwrap();
+        assert_eq!(saved_plugin.commit_sha, fixture.first_commit);
+        assert!(
+            saved_lock
+                .plugins
+                .iter()
+                .any(|plugin| plugin.repo == conflict_repo && plugin.name == "upgrade")
+        );
+
+        let alpha_path = fixture
+            .env
+            .fish_config_dir
+            .join(TargetDir::ConfD.as_str())
+            .join("alpha.fish");
+        let beta_path = fixture
+            .env
+            .fish_config_dir
+            .join(TargetDir::Functions.as_str())
+            .join("beta.fish");
+        assert_eq!(std::fs::read_to_string(alpha_path).unwrap(), "");
+        assert!(beta_path.is_file());
+        assert_eq!(
+            crate::git::get_latest_commit_sha(&repo).unwrap(),
+            fixture.first_commit,
+            "repo checkout should be restored when lock upsert fails"
+        );
     }
 
     #[allow(clippy::await_holding_lock)]
