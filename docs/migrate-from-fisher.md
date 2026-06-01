@@ -36,7 +36,8 @@ pez doctor
 
 ## Faster Flow
 
-Use `--install` when you want migration and install in one command:
+Use `--install` when `pez migrate --dry-run` shows entries that do not need
+manual edits before install:
 
 ```fish
 pez activate fish | source
@@ -84,8 +85,8 @@ Use `--force` only when you want the imported list to replace the current
   them to shorthand form or write explicit `url` entries in `pez.toml`.
 - SCP-style SSH entries such as `git@host:owner/repo.git` can be imported, but
   `pez.toml` treats scheme-less `url` values as HTTPS. Before running
-  `pez install`, convert them to `ssh://git@host/owner/repo.git` or
-  `repo = "host/owner/repo"`.
+  `pez install` or `pez migrate --install`, convert them to
+  `ssh://git@host/owner/repo.git` or `repo = "host/owner/repo"`.
 
 ## Rollback
 

@@ -10,16 +10,19 @@
 ## Install a Release Binary
 
 Download the asset for your platform from
-[GitHub Releases](https://github.com/tetzng/pez/releases), make it executable,
-and place it on your `PATH`.
+[GitHub Releases](https://github.com/tetzng/pez/releases). Release assets may
+be archives, so extract the downloaded file first, then make the `pez` binary
+executable and place it on your `PATH`.
 
 ```sh
-chmod +x pez
-./pez --version
+tar -xf pez-*.tar.*
+chmod +x path/to/pez
+path/to/pez --version
 ```
 
 Asset names vary by release and platform, so use the release page as the source
-of truth.
+of truth. Use the archive layout from the extracted asset when replacing
+`path/to/pez`.
 
 ## Install with Cargo
 
