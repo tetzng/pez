@@ -126,12 +126,25 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 info!("   - {}", dest_path.display());
             }
 
-            lock_file.remove_plugin(&locked.source);
-            lock_file.save(&lock_file_path)?;
-
-            if let Some(ref mut plugin_specs) = config.plugins {
+            let original_config = config.clone();
+            let config_saved = if let Some(ref mut plugin_specs) = config.plugins {
                 plugin_specs.retain(|p| p.get_plugin_repo().map_or(true, |r| r != *plugin_repo));
                 config.save(&config_path)?;
+                true
+            } else {
+                false
+            };
+
+            lock_file.remove_plugin(&locked.source);
+            if let Err(err) = lock_file.save(&lock_file_path) {
+                if config_saved && let Err(restore_err) = original_config.save(&config_path) {
+                    warn!(
+                        "Failed to restore config {} after failed uninstall: {:?}",
+                        config_path.display(),
+                        restore_err
+                    );
+                }
+                return Err(err);
             }
 
             staged_removals.commit();
@@ -725,6 +738,97 @@ owner/plugin-a
         );
         let saved_lock = lock_file::load(&env.lock_file_path).unwrap();
         assert!(saved_lock.get_plugin_by_repo(&repo).is_some());
+        let saved_config = config::load(&env.config_path).unwrap();
+        assert!(
+            saved_config.plugins.unwrap_or_default().iter().any(|p| p
+                .get_plugin_repo()
+                .ok()
+                .as_ref()
+                == Some(&repo))
+        );
+    }
+
+    #[test]
+    fn uninstall_preserves_state_when_config_save_fails() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+        ]);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+            std::env::set_var("__fish_config_dir", &env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
+        }
+
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".into(),
+            repo: "blocked".into(),
+        };
+        env.setup_config(config::Config {
+            plugins: Some(vec![config::PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: repo.clone(),
+                    version: None,
+                    branch: None,
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        });
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![crate::lock_file::Plugin {
+                name: "blocked".into(),
+                repo: repo.clone(),
+                source: repo.default_remote_source(),
+                commit_sha: "abc1234".into(),
+                files: vec![PluginFile {
+                    dir: TargetDir::ConfD,
+                    name: "blocked.fish".into(),
+                }],
+            }],
+        });
+        env.setup_data_repo(vec![repo.clone()]);
+        env.setup_fish_config();
+        let repo_path = env.data_dir.join(repo.as_str());
+        let plugin_file = env
+            .fish_config_dir
+            .join(TargetDir::ConfD.as_str())
+            .join("blocked.fish");
+        let original_perms = std::fs::metadata(&env.config_path).unwrap().permissions();
+        let mut read_only_perms = original_perms.clone();
+        read_only_perms.set_mode(0o400);
+        std::fs::set_permissions(&env.config_path, read_only_perms).unwrap();
+
+        let err = uninstall(&repo, true).expect_err("config save failure should abort uninstall");
+        std::fs::set_permissions(&env.config_path, original_perms).unwrap();
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Permission denied"), "{err_text}");
+        assert!(
+            repo_path.exists(),
+            "repo directory should remain when config save fails"
+        );
+        assert!(
+            plugin_file.exists(),
+            "staged plugin files should be restored when config save fails"
+        );
+        let saved_lock = lock_file::load(&env.lock_file_path).unwrap();
+        assert!(saved_lock.get_plugin_by_repo(&repo).is_some());
+        let saved_config = config::load(&env.config_path).unwrap();
+        assert!(
+            saved_config.plugins.unwrap_or_default().iter().any(|p| p
+                .get_plugin_repo()
+                .ok()
+                .as_ref()
+                == Some(&repo))
+        );
     }
 
     #[test]
