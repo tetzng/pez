@@ -593,8 +593,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
         if *prune {
             for plugin in ignored_lock_file_plugins {
                 info!("{}Removing plugin: {}", Emoji("🐟 ", ""), &plugin.name);
-                let repo_path = utils::load_pez_data_dir()?.join(plugin.repo.as_str());
-                let fish_config_dir = utils::load_fish_config_dir()?;
+                let repo_path = pez_data_dir.join(plugin.repo.as_str());
                 let file_paths: Vec<_> = plugin
                     .files
                     .iter()
