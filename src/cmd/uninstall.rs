@@ -116,13 +116,15 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 }
             }
 
-            let staged_removals = utils::stage_files_for_removal(&file_paths)?;
+            let staged_file_removals = utils::stage_files_for_removal(&file_paths)?;
+            let staged_repo_removals =
+                utils::stage_dirs_for_removal(std::slice::from_ref(&repo_path))?;
 
             info!(
                 "{}Removing plugin files based on pez-lock.toml:",
                 Emoji("🗑️  ", ""),
             );
-            for dest_path in staged_removals.removed_paths() {
+            for dest_path in staged_file_removals.removed_paths() {
                 info!("   - {}", dest_path.display());
             }
 
@@ -147,8 +149,8 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 return Err(err);
             }
 
-            staged_removals.commit();
-            utils::remove_dir_all_if_exists(&repo_path)?;
+            staged_file_removals.commit();
+            staged_repo_removals.commit();
             locked
                 .files
                 .iter()
@@ -832,7 +834,7 @@ owner/plugin-a
     }
 
     #[test]
-    fn uninstall_reports_repo_cleanup_failure() {
+    fn uninstall_removes_original_repo_path_when_staged_cleanup_fails() {
         let _lock = crate::tests_support::log::env_lock().lock().unwrap();
         let mut env = TestEnvironmentSetup::new();
         let _override = EnvOverride::new(&[
@@ -888,17 +890,30 @@ owner/plugin-a
         restricted_perms.set_mode(0o500);
         std::fs::set_permissions(&repo_path, restricted_perms).unwrap();
 
-        let err = uninstall(&repo, true).expect_err("repo cleanup failure should be reported");
-        std::fs::set_permissions(&repo_path, original_perms).unwrap();
-        let err_text = format!("{:#}", err);
+        let result = uninstall(&repo, true);
+        let owner_dir = repo_path.parent().unwrap();
+        if repo_path.exists() {
+            std::fs::set_permissions(&repo_path, original_perms.clone()).unwrap();
+        }
+        for entry in std::fs::read_dir(owner_dir).unwrap() {
+            let entry = entry.unwrap();
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".pez-removing-")
+            {
+                std::fs::set_permissions(entry.path(), original_perms.clone()).unwrap();
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+
+        result.expect("staged repo cleanup should not fail uninstall after state is persisted");
         assert!(
-            err_text.contains("Failed to remove directory"),
-            "{err_text}"
+            !repo_path.exists(),
+            "original repo directory should not remain after uninstall"
         );
-        assert!(
-            repo_path.exists(),
-            "repo directory should remain when cleanup fails"
-        );
+        let lock = lock_file::load(&env.lock_file_path).unwrap();
+        assert!(lock.get_plugin_by_repo(&repo).is_none());
     }
 
     #[test]

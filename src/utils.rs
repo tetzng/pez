@@ -204,7 +204,27 @@ pub(crate) fn ensure_file_removable_if_exists(path: &path::Path) -> anyhow::Resu
             if file_type.is_file() || file_type.is_symlink() {
                 Ok(true)
             } else {
-                anyhow::bail!("Failed to remove {}: path is not a file", path.display());
+                anyhow::bail!(
+                    "Failed to remove {}: path is not a file or symlink",
+                    path.display()
+                );
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("Failed to inspect {}", path.display())),
+    }
+}
+
+fn ensure_dir_removable_if_exists(path: &path::Path) -> anyhow::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_dir() {
+                Ok(true)
+            } else {
+                anyhow::bail!(
+                    "Failed to remove directory {}: path is not a directory",
+                    path.display()
+                );
             }
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -213,11 +233,16 @@ pub(crate) fn ensure_file_removable_if_exists(path: &path::Path) -> anyhow::Resu
 }
 
 pub(crate) struct StagedFileRemovals {
-    entries: Vec<StagedFileRemoval>,
+    entries: Vec<StagedRemovalEntry>,
     committed: bool,
 }
 
-struct StagedFileRemoval {
+pub(crate) struct StagedDirRemovals {
+    entries: Vec<StagedRemovalEntry>,
+    committed: bool,
+}
+
+struct StagedRemovalEntry {
     original: path::PathBuf,
     staged: path::PathBuf,
 }
@@ -233,6 +258,21 @@ impl StagedFileRemovals {
             if let Err(err) = remove_file_if_exists(&entry.staged) {
                 warn!(
                     "Failed to clean staged removal {}: {:?}",
+                    entry.staged.display(),
+                    err
+                );
+            }
+        }
+    }
+}
+
+impl StagedDirRemovals {
+    pub(crate) fn commit(mut self) {
+        self.committed = true;
+        for entry in &self.entries {
+            if let Err(err) = remove_dir_all_if_exists(&entry.staged) {
+                warn!(
+                    "Failed to clean staged directory removal {}: {:?}",
                     entry.staged.display(),
                     err
                 );
@@ -276,6 +316,41 @@ impl Drop for StagedFileRemovals {
     }
 }
 
+impl Drop for StagedDirRemovals {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+
+        for entry in self.entries.iter().rev() {
+            if !path_exists(&entry.staged) {
+                continue;
+            }
+
+            if path_exists(&entry.original)
+                && let Err(err) = remove_dir_all_if_exists(&entry.original)
+            {
+                warn!(
+                    "Failed to restore directory {} from staged removal {}: {:?}",
+                    entry.original.display(),
+                    entry.staged.display(),
+                    err
+                );
+                continue;
+            }
+
+            if let Err(err) = fs::rename(&entry.staged, &entry.original) {
+                warn!(
+                    "Failed to restore directory {} from staged removal {}: {:?}",
+                    entry.original.display(),
+                    entry.staged.display(),
+                    err
+                );
+            }
+        }
+    }
+}
+
 pub(crate) fn stage_files_for_removal(
     paths: &[path::PathBuf],
 ) -> anyhow::Result<StagedFileRemovals> {
@@ -296,7 +371,35 @@ pub(crate) fn stage_files_for_removal(
                 return Err(err).with_context(|| format!("Failed to remove {}", path.display()));
             }
         }
-        staged_removals.entries.push(StagedFileRemoval {
+        staged_removals.entries.push(StagedRemovalEntry {
+            original: path.clone(),
+            staged,
+        });
+    }
+
+    Ok(staged_removals)
+}
+
+pub(crate) fn stage_dirs_for_removal(paths: &[path::PathBuf]) -> anyhow::Result<StagedDirRemovals> {
+    let mut staged_removals = StagedDirRemovals {
+        entries: Vec::new(),
+        committed: false,
+    };
+    for (index, path) in paths.iter().enumerate() {
+        if !ensure_dir_removable_if_exists(path)? {
+            continue;
+        }
+
+        let staged = unique_staged_removal_path(path, index)?;
+        match fs::rename(path, &staged) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("Failed to remove directory {}", path.display()));
+            }
+        }
+        staged_removals.entries.push(StagedRemovalEntry {
             original: path.clone(),
             staged,
         });
@@ -627,7 +730,7 @@ mod tests {
     use crate::models::TargetDir;
     use crate::tests_support::env::TestEnvironmentSetup;
     use crate::tests_support::log::{capture_logs, env_lock};
-    use std::{ffi::OsString, os::unix::fs::PermissionsExt};
+    use std::ffi::OsString;
 
     struct EnvGuard {
         vars: Vec<(&'static str, Option<OsString>)>,
@@ -767,8 +870,11 @@ mod tests {
         assert_eq!(load_jobs(), 4);
     }
 
+    #[cfg(unix)]
     #[test]
     fn path_exists_treats_metadata_errors_as_existing() {
+        use std::os::unix::fs::PermissionsExt;
+
         let temp = tempfile::tempdir().unwrap();
         let restricted_dir = temp.path().join("restricted");
         std::fs::create_dir_all(&restricted_dir).unwrap();

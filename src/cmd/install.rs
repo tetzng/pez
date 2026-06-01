@@ -622,21 +622,23 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     }
                 }
 
-                let staged_removals = utils::stage_files_for_removal(&file_paths)?;
+                let staged_file_removals = utils::stage_files_for_removal(&file_paths)?;
+                let staged_repo_removals =
+                    utils::stage_dirs_for_removal(std::slice::from_ref(&repo_path))?;
 
                 info!(
                     "{}Removing plugin files based on pez-lock.toml:",
                     Emoji("🗑️  ", ""),
                 );
 
-                for dest_path in staged_removals.removed_paths() {
+                for dest_path in staged_file_removals.removed_paths() {
                     info!("   - {}", dest_path.display());
                 }
 
                 lock_file.remove_plugin(&plugin.source);
                 lock_file.save(&lock_file_path)?;
-                staged_removals.commit();
-                utils::remove_dir_all_if_exists(&repo_path)?;
+                staged_file_removals.commit();
+                staged_repo_removals.commit();
                 emit_event(&plugin, &utils::Event::Uninstall)?;
             }
         } else {

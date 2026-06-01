@@ -154,20 +154,21 @@ where
             }
         }
 
-        let staged_removals = utils::stage_files_for_removal(&file_paths)?;
+        let staged_file_removals = utils::stage_files_for_removal(&file_paths)?;
+        let staged_repo_removals = utils::stage_dirs_for_removal(std::slice::from_ref(&repo_path))?;
 
         info!(
             "{}Removing plugin files based on pez-lock.toml:",
             Emoji("🗑️  ", ""),
         );
-        for dest_path in staged_removals.removed_paths() {
+        for dest_path in staged_file_removals.removed_paths() {
             info!("   - {}", dest_path.display());
         }
 
         ctx.lock_file.remove_plugin(&plugin.source);
         ctx.lock_file.save(ctx.lock_file_path)?;
-        staged_removals.commit();
-        utils::remove_dir_all_if_exists(&repo_path)?;
+        staged_file_removals.commit();
+        staged_repo_removals.commit();
     }
     info!(
         "\n{}All uninstalled plugins have been pruned successfully!",
@@ -252,39 +253,45 @@ where
                             info!("   - {}", dest_path.display());
                         }
                         return Ok::<
-                            Option<(String, utils::StagedFileRemovals, path::PathBuf)>,
+                            Option<(String, utils::StagedFileRemovals, utils::StagedDirRemovals)>,
                             anyhow::Error,
                         >(None);
                     }
                 }
 
-                let staged_removals = tokio::task::spawn_blocking(move || {
+                let staged_file_removals = tokio::task::spawn_blocking(move || {
                     utils::stage_files_for_removal(&file_paths)
                 })
                 .await??;
+                let staged_repo_removals =
+                    utils::stage_dirs_for_removal(std::slice::from_ref(&repo_path))?;
 
                 info!(
                     "{}Removing plugin files based on pez-lock.toml:",
                     Emoji("🗑️  ", ""),
                 );
-                for dest_path in staged_removals.removed_paths() {
+                for dest_path in staged_file_removals.removed_paths() {
                     info!("   - {}", dest_path.display());
                 }
 
-                Ok(Some((plugin.source.clone(), staged_removals, repo_path)))
+                Ok(Some((
+                    plugin.source.clone(),
+                    staged_file_removals,
+                    staged_repo_removals,
+                )))
             }
         })
         .buffer_unordered(jobs);
 
     let mut sources_to_remove: Vec<String> = Vec::new();
-    let mut staged_removals = Vec::new();
-    let mut repo_paths = Vec::new();
+    let mut staged_file_removals = Vec::new();
+    let mut staged_repo_removals = Vec::new();
     futures::pin_mut!(tasks);
     while let Some(res) = tasks.next().await {
-        if let Some((source, removals, repo_path)) = res? {
+        if let Some((source, file_removals, repo_removals)) = res? {
             sources_to_remove.push(source);
-            staged_removals.push(removals);
-            repo_paths.push(repo_path);
+            staged_file_removals.push(file_removals);
+            staged_repo_removals.push(repo_removals);
         }
     }
 
@@ -293,11 +300,11 @@ where
             .plugins
             .retain(|p| !sources_to_remove.contains(&p.source));
         ctx.lock_file.save(ctx.lock_file_path)?;
-        for removals in staged_removals {
+        for removals in staged_file_removals {
             removals.commit();
         }
-        for repo_path in repo_paths {
-            utils::remove_dir_all_if_exists(&repo_path)?;
+        for removals in staged_repo_removals {
+            removals.commit();
         }
     }
 
@@ -425,7 +432,7 @@ impl Drop for ConfirmInputGuard {
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsString, fs, future::Future, os::unix::fs::PermissionsExt, vec};
+    use std::{ffi::OsString, fs, future::Future, vec};
 
     use super::*;
     use crate::tests_support::log::{capture_logs, env_lock};
@@ -436,6 +443,8 @@ mod tests {
         tests_support::env::TestEnvironmentSetup,
     };
     use config::{PluginSource, PluginSpec};
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     struct EnvOverride {
         keys: Vec<&'static str>,
@@ -801,6 +810,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn prune_preserves_repo_when_plugin_file_removal_fails() {
         let mut test_env = TestEnvironmentSetup::new();
@@ -844,6 +854,7 @@ mod tests {
         assert!(blocked_path.is_file());
     }
 
+    #[cfg(unix)]
     #[test]
     fn prune_preserves_repo_when_lock_save_fails() {
         let mut test_env = TestEnvironmentSetup::new();
@@ -949,6 +960,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
     async fn prune_parallel_preserves_lock_when_plugin_file_removal_fails() {
         let _jobs = JobsGuard::set(1);
@@ -993,6 +1005,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
     async fn prune_parallel_preserves_repo_when_lock_save_fails() {
         let _jobs = JobsGuard::set(1);
