@@ -2,7 +2,7 @@ use crate::{cli::UninstallArgs, models::PluginRepo, models::TargetDir, utils};
 
 use console::Emoji;
 use futures::{StreamExt, stream};
-use std::{collections::HashSet, fs, io};
+use std::{collections::HashSet, io};
 use tracing::{error, info, warn};
 
 pub(crate) async fn run(args: &UninstallArgs) -> anyhow::Result<()> {
@@ -126,9 +126,6 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
                 info!("   - {}", dest_path.display());
             }
 
-            if repo_path.exists() {
-                fs::remove_dir_all(&repo_path)?;
-            }
             lock_file.remove_plugin(&locked.source);
             lock_file.save(&lock_file_path)?;
 
@@ -138,6 +135,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
             }
 
             staged_removals.commit();
+            utils::remove_dir_all_best_effort(&repo_path);
             locked
                 .files
                 .iter()
@@ -650,6 +648,83 @@ owner/plugin-a
             !log_path.exists(),
             "uninstall event should not be emitted when deletion is rejected"
         );
+    }
+
+    #[test]
+    fn uninstall_preserves_repo_when_lock_save_fails() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+        ]);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+            std::env::set_var("__fish_config_dir", &env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
+        }
+
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".into(),
+            repo: "blocked".into(),
+        };
+        env.setup_config(config::Config {
+            plugins: Some(vec![config::PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: repo.clone(),
+                    version: None,
+                    branch: None,
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        });
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![crate::lock_file::Plugin {
+                name: "blocked".into(),
+                repo: repo.clone(),
+                source: repo.default_remote_source(),
+                commit_sha: "abc1234".into(),
+                files: vec![PluginFile {
+                    dir: TargetDir::ConfD,
+                    name: "blocked.fish".into(),
+                }],
+            }],
+        });
+        env.setup_data_repo(vec![repo.clone()]);
+        env.setup_fish_config();
+        let repo_path = env.data_dir.join(repo.as_str());
+        let plugin_file = env
+            .fish_config_dir
+            .join(TargetDir::ConfD.as_str())
+            .join("blocked.fish");
+        let original_perms = std::fs::metadata(&env.lock_file_path)
+            .unwrap()
+            .permissions();
+        let mut read_only_perms = original_perms.clone();
+        read_only_perms.set_mode(0o400);
+        std::fs::set_permissions(&env.lock_file_path, read_only_perms).unwrap();
+
+        let err = uninstall(&repo, true).expect_err("lock save failure should abort uninstall");
+        std::fs::set_permissions(&env.lock_file_path, original_perms).unwrap();
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Permission denied"), "{err_text}");
+        assert!(
+            repo_path.exists(),
+            "repo directory should remain when lock save fails"
+        );
+        assert!(
+            plugin_file.exists(),
+            "staged plugin files should be restored when lock save fails"
+        );
+        let saved_lock = lock_file::load(&env.lock_file_path).unwrap();
+        assert!(saved_lock.get_plugin_by_repo(&repo).is_some());
     }
 
     #[test]

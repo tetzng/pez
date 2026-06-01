@@ -9,7 +9,7 @@ use std::{
     collections::HashSet,
     env,
     ffi::OsString,
-    fmt, fs, path, process,
+    fmt, fs, io, path, process,
     sync::{Mutex, OnceLock},
 };
 use tracing::{debug, error, info, warn};
@@ -184,6 +184,14 @@ pub(crate) fn remove_file_if_exists(path: &path::Path) -> anyhow::Result<bool> {
     }
 }
 
+pub(crate) fn remove_dir_all_best_effort(path: &path::Path) {
+    match fs::remove_dir_all(path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => warn!("Failed to remove directory {}: {:?}", path.display(), err),
+    }
+}
+
 pub(crate) fn ensure_file_removable_if_exists(path: &path::Path) -> anyhow::Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
@@ -327,7 +335,14 @@ fn unique_staged_removal_path(path: &path::Path, index: usize) -> anyhow::Result
 }
 
 fn path_exists(path: &path::Path) -> bool {
-    fs::symlink_metadata(path).is_ok()
+    match fs::symlink_metadata(path) {
+        Ok(_) => true,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => false,
+        Err(err) => {
+            warn!("Failed to inspect {}: {:?}", path.display(), err);
+            true
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -607,7 +622,7 @@ mod tests {
     use crate::models::TargetDir;
     use crate::tests_support::env::TestEnvironmentSetup;
     use crate::tests_support::log::{capture_logs, env_lock};
-    use std::ffi::OsString;
+    use std::{ffi::OsString, os::unix::fs::PermissionsExt};
 
     struct EnvGuard {
         vars: Vec<(&'static str, Option<OsString>)>,
@@ -745,6 +760,26 @@ mod tests {
             std::env::remove_var("PEZ_JOBS");
         }
         assert_eq!(load_jobs(), 4);
+    }
+
+    #[test]
+    fn path_exists_treats_metadata_errors_as_existing() {
+        let temp = tempfile::tempdir().unwrap();
+        let restricted_dir = temp.path().join("restricted");
+        std::fs::create_dir_all(&restricted_dir).unwrap();
+        let path = restricted_dir.join("maybe-existing");
+        let original_perms = std::fs::metadata(&restricted_dir).unwrap().permissions();
+        let mut restricted_perms = original_perms.clone();
+        restricted_perms.set_mode(0o000);
+        std::fs::set_permissions(&restricted_dir, restricted_perms).unwrap();
+
+        let exists = path_exists(&path);
+
+        std::fs::set_permissions(&restricted_dir, original_perms).unwrap();
+        assert!(
+            exists,
+            "metadata errors should be treated as existing to avoid overwriting or skipping restore"
+        );
     }
 
     #[test]

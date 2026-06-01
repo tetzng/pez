@@ -633,12 +633,10 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                     info!("   - {}", dest_path.display());
                 }
 
-                if repo_path.exists() {
-                    fs::remove_dir_all(&repo_path)?;
-                }
                 lock_file.remove_plugin(&plugin.source);
                 lock_file.save(&lock_file_path)?;
                 staged_removals.commit();
+                utils::remove_dir_all_best_effort(&repo_path);
                 emit_event(&plugin, &utils::Event::Uninstall)?;
             }
         } else {
@@ -1825,6 +1823,75 @@ mod tests {
             !log_path.exists(),
             "uninstall event should not be emitted when deletion is rejected"
         );
+    }
+
+    #[test]
+    fn install_all_prune_preserves_repo_when_lock_save_fails() {
+        let _env_lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut test_env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+            "PEZ_TARGET_DIR",
+            "__fish_config_dir",
+            "XDG_CONFIG_HOME",
+            "__fish_user_data_dir",
+            "XDG_DATA_HOME",
+            "HOME",
+            "PEZ_SUPPRESS_EMIT",
+        ]);
+
+        let repo = PluginRepo::new(None, "owner".to_string(), "blocked".to_string()).unwrap();
+        test_env.setup_config(config::Config {
+            plugins: Some(vec![]),
+        });
+        test_env.setup_lock_file(crate::lock_file::LockFile {
+            version: 1,
+            plugins: vec![Plugin {
+                name: repo.repo.clone(),
+                repo: repo.clone(),
+                source: repo.default_remote_source(),
+                commit_sha: "blocked-sha".to_string(),
+                files: vec![PluginFile {
+                    dir: TargetDir::ConfD,
+                    name: "blocked.fish".to_string(),
+                }],
+            }],
+        });
+        let repo_path = test_env.data_dir.join(repo.as_str());
+        std::fs::create_dir_all(&repo_path).unwrap();
+        let plugin_file = test_env
+            .fish_config_dir
+            .join(TargetDir::ConfD.as_str())
+            .join("blocked.fish");
+        std::fs::create_dir_all(plugin_file.parent().unwrap()).unwrap();
+        std::fs::write(&plugin_file, "echo blocked\n").unwrap();
+
+        set_test_env_vars(&test_env);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+        }
+        let original_perms = std::fs::metadata(&test_env.lock_file_path)
+            .unwrap()
+            .permissions();
+        let mut read_only_perms = original_perms.clone();
+        read_only_perms.set_mode(0o400);
+        std::fs::set_permissions(&test_env.lock_file_path, read_only_perms).unwrap();
+
+        let err = install_all(&true, &true).expect_err("lock save failure should abort prune");
+        std::fs::set_permissions(&test_env.lock_file_path, original_perms).unwrap();
+        let err_text = format!("{:#}", err);
+        assert!(err_text.contains("Permission denied"), "{err_text}");
+        assert!(
+            repo_path.exists(),
+            "repo directory should remain when lock save fails"
+        );
+        assert!(
+            plugin_file.exists(),
+            "staged plugin files should be restored when lock save fails"
+        );
+        let saved_lock = crate::lock_file::load(&test_env.lock_file_path).unwrap();
+        assert!(saved_lock.get_plugin_by_repo(&repo).is_some());
     }
 
     #[test]
