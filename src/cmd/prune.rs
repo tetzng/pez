@@ -259,12 +259,14 @@ where
                     }
                 }
 
-                let staged_file_removals = tokio::task::spawn_blocking(move || {
-                    utils::stage_files_for_removal(&file_paths)
-                })
-                .await??;
-                let staged_repo_removals =
-                    utils::stage_dirs_for_removal(std::slice::from_ref(&repo_path))?;
+                let (staged_file_removals, staged_repo_removals) =
+                    tokio::task::spawn_blocking(move || {
+                        let staged_file_removals = utils::stage_files_for_removal(&file_paths)?;
+                        let staged_repo_removals =
+                            utils::stage_dirs_for_removal(std::slice::from_ref(&repo_path))?;
+                        Ok::<_, anyhow::Error>((staged_file_removals, staged_repo_removals))
+                    })
+                    .await??;
 
                 info!(
                     "{}Removing plugin files based on pez-lock.toml:",
