@@ -207,14 +207,6 @@ pub(crate) fn ensure_file_removable_if_exists(path: &path::Path) -> anyhow::Resu
     }
 }
 
-pub(crate) fn ensure_files_removable(paths: &[path::PathBuf]) -> anyhow::Result<()> {
-    for path in paths {
-        ensure_file_removable_if_exists(path)?;
-    }
-
-    Ok(())
-}
-
 pub(crate) struct StagedFileRemovals {
     entries: Vec<StagedFileRemoval>,
     committed: bool,
@@ -282,8 +274,6 @@ impl Drop for StagedFileRemovals {
 pub(crate) fn stage_files_for_removal(
     paths: &[path::PathBuf],
 ) -> anyhow::Result<StagedFileRemovals> {
-    ensure_files_removable(paths)?;
-
     let mut staged_removals = StagedFileRemovals {
         entries: Vec::new(),
         committed: false,
@@ -294,8 +284,13 @@ pub(crate) fn stage_files_for_removal(
         }
 
         let staged = unique_staged_removal_path(path, index)?;
-        fs::rename(path, &staged)
-            .with_context(|| format!("Failed to remove {}", path.display()))?;
+        match fs::rename(path, &staged) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(err).with_context(|| format!("Failed to remove {}", path.display()));
+            }
+        }
         staged_removals.entries.push(StagedFileRemoval {
             original: path.clone(),
             staged,
@@ -780,6 +775,21 @@ mod tests {
             exists,
             "metadata errors should be treated as existing to avoid overwriting or skipping restore"
         );
+    }
+
+    #[test]
+    fn stage_files_for_removal_skips_missing_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("plugin.fish");
+        std::fs::write(&path, "plugin").unwrap();
+
+        let staged =
+            stage_files_for_removal(&[path.clone(), path.clone()]).expect("stage should succeed");
+
+        assert_eq!(staged.removed_paths().count(), 1);
+        assert!(!path.exists());
+        drop(staged);
+        assert!(path.is_file());
     }
 
     #[test]
