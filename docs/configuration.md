@@ -65,6 +65,9 @@ Rules:
 - `repo = "owner/repo"` resolves to GitHub.
 - `repo = "host/owner/repo"` resolves to `https://host/owner/repo`.
 - `url` values without a scheme are normalized to `https://`.
+- SCP-style SSH remotes such as `git@host:owner/repo.git` are not valid
+  scheme-less `url` values in `pez.toml`; use
+  `ssh://git@host/owner/repo.git` or `repo = "host/owner/repo"` instead.
 - `path` values must be absolute or start with `~/` in `pez.toml`.
 - CLI installs may use relative paths; pez normalizes them before saving.
 - Unknown keys are rejected.

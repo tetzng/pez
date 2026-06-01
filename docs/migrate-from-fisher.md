@@ -82,6 +82,10 @@ Use `--force` only when you want the imported list to replace the current
 - fisher itself being absent from `pez.toml` is expected. `pez migrate` skips it.
 - URL-style fisher entries with ambiguous `@ref` suffixes may be ignored. Convert
   them to shorthand form or write explicit `url` entries in `pez.toml`.
+- SCP-style SSH entries such as `git@host:owner/repo.git` can be imported, but
+  `pez.toml` treats scheme-less `url` values as HTTPS. Before running
+  `pez install`, convert them to `ssh://git@host/owner/repo.git` or
+  `repo = "host/owner/repo"`.
 
 ## Rollback
 
