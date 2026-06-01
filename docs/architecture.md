@@ -24,8 +24,8 @@ and dispatches each command through `src/cmd/`.
 3. Clone remote repos into the pez data directory. Local path sources skip clone.
 4. Resolve the selected revision.
 5. Copy supported fish assets into the target fish config directory.
-6. Detect duplicate destinations before recording files.
-7. Write installed state to `pez-lock.toml`.
+6. Apply run-level duplicate destination checks while copying files.
+7. Write installed state and copied file records to `pez-lock.toml`.
 8. Emit hook events for eligible `conf.d` files.
 
 Explicit CLI installs clone concurrently and then copy files sequentially.

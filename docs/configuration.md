@@ -122,9 +122,10 @@ pez copies only supported fish assets from top-level plugin directories:
 | `conf.d` | `.fish` files |
 | `themes` | `.theme` files |
 
-Subdirectories are preserved. If two plugins would write the same destination
-path in one run, the later plugin is skipped and is not recorded in the
-lockfile.
+Subdirectories are preserved. Duplicate destination checks are run-level: if a
+later plugin would write a path already claimed earlier in the same run, pez
+skips that plugin's file copies. The plugin entry can still appear in
+`pez-lock.toml`, but copied files are not recorded for that plugin.
 
 ## Hooks and Activation
 
