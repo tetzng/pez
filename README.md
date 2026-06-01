@@ -1,40 +1,38 @@
-<h1 align="center">pez</h1>
+# pez
 
-<p align="center"><strong>A Rust-based plugin manager for <a href="https://fishshell.com/">fish</a></strong></p>
+A lockfile-backed plugin manager for fish.
 
-<p align="center">
-  <em>Experimental</em> — use at your own risk.
-</p>
+pez installs fish plugins from Git repositories or local paths, copies their
+fish assets into the standard config directories, and records the exact
+installed state in `pez-lock.toml`.
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/tetzng/pez)
+Status: experimental. Back up your fish config before migrating, and verify the
+result with `pez doctor` before removing another plugin manager.
 
-## Overview
+## Why pez?
 
-pez is a Rust-based plugin manager for fish. It installs plugins by cloning
-repositories, copying fish assets into the standard directories, and tracking
-state in a lockfile.
+- Lockfile state for installed commits and copied files
+- GitHub shorthand, host-prefixed repos, full Git URLs, and local plugin paths
+- Duplicate destination checks before plugin files are recorded
+- `doctor`, `files`, `list --outdated`, `upgrade`, and `prune` commands for routine maintenance
+- A guided migration path from fisher
 
-## Features
+## Install
 
-- GitHub shorthand and non-GitHub hosts (URL or `host/owner/repo`)
-- Lockfile with exact commits and installed file records
-- Duplicate destination detection to avoid overwrites
-- `upgrade`, `prune`, and `doctor` utilities
-- Optional activation wrapper to emit conf.d events in the current shell
+Use a prebuilt binary from [GitHub Releases](https://github.com/tetzng/pez/releases)
+when one is available.
 
-## Installation
-
-Install with Cargo:
+With Cargo:
 
 ```sh
-# From crates.io (if available)
 cargo install pez
-
-# From source (in this repo)
-cargo install --path .
 ```
 
-Or use a prebuilt release binary (when available), which does not require Cargo.
+From this checkout:
+
+```sh
+cargo install --path .
+```
 
 With Nix flakes:
 
@@ -42,71 +40,51 @@ With Nix flakes:
 nix run github:tetzng/pez -- --version
 ```
 
-If flakes are not enabled globally, run it as
-`nix --extra-experimental-features 'nix-command flakes' run github:tetzng/pez -- --version`.
+More options: [docs/install.md](docs/install.md)
 
-## Quickstart
+## Quick Start
+
+Create the config file:
 
 ```fish
-# 1) Initialize configuration (creates pez.toml)
 pez init
+```
 
-# 2) Add a plugin to pez.toml (choose one of repo/url/path)
-#    [[plugins]]
-#    repo = "owner/repo"      # GitHub shorthand
-#    # version = "v3"        # Or: tag = "...", branch = "...", commit = "..."
-#
-#    # [[plugins]]
-#    # url = "https://gitlab.com/owner/repo"  # Any Git host URL
-#    # branch = "main"
-#
-#    # [[plugins]]
-#    # path = "~/path/to/local/plugin"       # Local directory (absolute or ~/ only)
-#    # Note: when specifying a relative path or ~/ at the CLI (e.g., ./plugin), pez normalizes it to an absolute path in pez.toml.
+Add a plugin to `pez.toml`:
 
-# 3) Install plugins listed in pez.toml
+```toml
+[[plugins]]
+repo = "owner/repo"
+```
+
+Install and inspect:
+
+```fish
 pez install
-
-# 4) Verify installation
 pez list --format table
+pez doctor
+```
 
-# 5) (Optional) Enable completions for pez itself
-pez completions fish > ~/.config/fish/completions/pez.fish
+Install a single plugin directly:
 
-# 6) (Optional) Activate fish shell hooks (emit conf.d events in the current shell)
+```fish
+pez install owner/repo
+pez install gitlab.com/owner/repo@branch:main
+pez install ./local-plugin
+```
+
+Enable hooks in the current shell when plugins rely on `conf.d` events:
+
+```fish
 pez activate fish | source
 ```
 
-## Shell Completions
-
-```fish
-pez completions fish > ~/.config/fish/completions/pez.fish
-```
-
-Completions are intentionally Fish-only.
-
-## Shell Activation
-
-```fish
-# Enable conf.d events in the current shell for install/upgrade/uninstall
-pez activate fish | source
-```
-
-For persistence, add it inside an `if status is-interactive ... end` block in `~/.config/fish/config.fish`.
-
-## Docs & FAQ
-
-- [Getting started](docs/getting-started.md)
-  - [Quick start](docs/getting-started.md#quick-start)
-  - [CLI usage](docs/getting-started.md#cli-usage-examples)
-- [Command reference](docs/commands.md)
-- [Configuration](docs/configuration.md)
-- [Architecture](docs/architecture.md)
-- [Install & build](docs/install.md)
-- [Migrate from fisher](docs/migrate-from-fisher.md)
-- [FAQ](docs/faq.md)
+Persist that activation from `~/.config/fish/config.fish` inside an
+interactive-shell guard.
 
 ## Migrate from fisher
+
+Use the low-risk path:
 
 ```fish
 pez activate fish | source
@@ -116,88 +94,27 @@ pez list --format table
 pez doctor
 ```
 
+Only remove fisher after the migrated setup looks correct.
+
 Details: [docs/migrate-from-fisher.md](docs/migrate-from-fisher.md)
 
-## Usage (overview)
+## Docs
 
-```fish
-Usage: pez [OPTIONS] <COMMAND>
-
-Commands:
-  init | install | uninstall | upgrade | list | prune | completions | activate | doctor | migrate | files
-
-Options:
-  -v, --verbose  Increase output verbosity (-v for info, -vv for debug)
-  --jobs <N>     Override parallel job limit (default: 4; overrides PEZ_JOBS)
-  -h, --help     Print help
-  -V, --version  Print version
-```
-
-Common examples
-
-```fish
-pez init
-pez install                 # install from pez.toml
-pez install owner/repo      # install a specific plugin
-pez upgrade                 # update non-local plugins to remote HEAD
-pez list --outdated --format table
-pez prune --dry-run
-```
-
-See the full command reference in [docs/commands.md](docs/commands.md).
-
-## Configuration
-
-pez uses `pez.toml` and `pez-lock.toml` under the fish config directory by
-default. Configuration file precedence is:
-`$PEZ_CONFIG_DIR` > `$__fish_config_dir` > `$XDG_CONFIG_HOME/fish` > `~/.config/fish`.
-
-`PEZ_TARGET_DIR` only affects where plugin files are copied. For schema,
-location details, and environment variables, see [docs/configuration.md](docs/configuration.md).
-
-To regenerate the config schema:
-
-```sh
-cargo run --features schema-gen --bin gen-config-schema
-```
-
-For install/upgrade behavior (selectors, duplicates, concurrency, existing
-clones), see [docs/commands.md](docs/commands.md).
-
-## Troubleshooting
-
-- `pez doctor` checks config/lock/data directories and copied files.
-- `pez list --format json` shows the current lockfile state.
-- `pez files --all` lists installed file paths.
+- [Getting started](docs/getting-started.md)
+- [Command reference](docs/commands.md)
+- [Configuration and lockfile](docs/configuration.md)
+- [Install and build](docs/install.md)
+- [Migrate from fisher](docs/migrate-from-fisher.md)
+- [FAQ](docs/faq.md)
+- [Architecture](docs/architecture.md)
 
 ## Security
 
-pez installs plugin files from third-party repositories. If you enable the
-activation wrapper, `conf.d` scripts are sourced in the current shell. pez does
-not verify signatures or sandbox code. Only install plugins you trust.
-
-## Contributing
-
-There is no formal contributing guide yet. If you want to help, open a PR and
-run `cargo fmt --all`, `cargo clippy --workspace --all-targets --all-features`,
-and `cargo test --all-features`.
-
-## Changelog
-
-No dedicated changelog is maintained yet. Use git history to review changes.
-
-## Acknowledgements
-
-pez is inspired by the following projects:
-
-- [fisher](https://github.com/jorgebucaran/fisher)
-- [oh-my-fish](https://github.com/oh-my-fish/oh-my-fish)
-- [fundle](https://github.com/danhper/fundle)
+pez installs code from third-party repositories into your fish configuration.
+It does not verify signatures or sandbox plugin code. Install plugins you trust,
+review migration changes before removing fisher, and keep `pez doctor` in your
+verification flow.
 
 ## License
 
 [MIT](./LICENSE)
-
-## Author
-
-tetzng

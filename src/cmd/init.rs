@@ -18,22 +18,26 @@ fn create_config(config_dir: &path::Path) -> anyhow::Result<()> {
         anyhow::bail!("{} already exists", config_path.display());
     }
 
-    let contents = r#"# This file defines the plugins to be installed by pez.
-
-# Examples of plugins:
-# [[plugins]]
-# repo = "owner/repo"      # GitHub shorthand
-# # version = "v3"        # Or: tag = "...", branch = "...", commit = "..."
-# # name = "custom-name"   # Optional display name
+    let contents = r#"# Plugins managed by pez.
+#
+# Use exactly one source per plugin: repo, url, or path.
+# Remote sources may use one selector: version, branch, tag, or commit.
 
 # [[plugins]]
-# url = "https://gitlab.com/owner/repo"  # Any Git host URL
+# repo = "owner/repo"        # GitHub shorthand
+# # version = "v3"          # Branch-or-tag selector
+# # name = "custom-name"    # Optional display name
+
+# [[plugins]]
+# repo = "gitlab.com/owner/repo"
 # # branch = "main"
 
 # [[plugins]]
-# path = "~/path/to/local/plugin"       # Local directory
+# url = "https://example.com/owner/repo.git"
+# # tag = "v1.2.3"
 
-# Add more plugins by copying the [[plugins]] block.
+# [[plugins]]
+# path = "~/plugins/local-plugin"
 "#;
     fs::write(&config_path, contents)?;
     info!("Created {}", config_path.display());

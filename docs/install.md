@@ -1,88 +1,99 @@
-## Install & build
+# Install and Build
 
-### System requirements
+## Requirements
 
-- No mandatory external tools are required when using a prebuilt `pez` binary.
-- Cargo is required only for `cargo install` or local source builds.
-- Fish is required only for actually using installed Fish plugins.
+- A prebuilt `pez` binary does not require Cargo.
+- Cargo is required for `cargo install` and source builds.
+- fish is required to use installed fish plugins and to source activation code.
+- Nix is optional.
 
-### Install
+## Install a Release Binary
 
-Install with Cargo (from crates.io if available):
+Download the asset for your platform from
+[GitHub Releases](https://github.com/tetzng/pez/releases), make it executable,
+and place it on your `PATH`.
 
-```shell
+```sh
+chmod +x pez
+./pez --version
+```
+
+Asset names vary by release and platform, so use the release page as the source
+of truth.
+
+## Install with Cargo
+
+When the crate is published to crates.io:
+
+```sh
 cargo install pez
 ```
 
-From source (this repo):
+From this repository checkout:
 
-```shell
+```sh
 cargo install --path .
 ```
 
-From GitHub Releases (prebuilt binary, when available):
+## Run with Nix
 
-```shell
-# Visit the Releases page and download the asset for your platform.
-# Example (Linux x86_64):
-curl -fsSL -o pez https://github.com/<owner>/<repo>/releases/download/<tag>/pez-<tag>-linux-amd64
-chmod +x pez
-./pez -V
-```
-
-With Nix flakes:
-
-```shell
+```sh
 nix run github:tetzng/pez -- --version
 ```
 
-Notes
+If flakes are not enabled globally:
 
-- On tagged releases (`v*.*.*`), CI builds, tests, and uploads release artifacts.
-- Asset filenames vary by platform; check the release page for the exact names.
-- Nix flake commands require flakes to be enabled. If they are not enabled
-  globally, run them as
-  `nix --extra-experimental-features 'nix-command flakes' <subcommand> ...`.
+```sh
+nix --extra-experimental-features 'nix-command flakes' run github:tetzng/pez -- --version
+```
 
-### Build from source
+## Build from Source
 
-```shell
+```sh
 cargo build --release
-./target/release/pez -V
+./target/release/pez --version
 ```
 
-With Nix flakes:
+With Nix:
 
-```shell
+```sh
 nix build .#
-./result/bin/pez -V
+./result/bin/pez --version
 ```
 
-### Development shell
+## Development Shell
 
-Enter the Nix development environment:
-
-```shell
+```sh
 nix develop .#
 ```
 
-This provides the Rust toolchain, `rustfmt`, `clippy`, and Fish for local
-development from the pinned Nix flake input. It does not read
-`rust-toolchain.toml`; use rustup outside Nix when you need that file to select
-the toolchain exactly.
+The Nix shell provides the Rust toolchain, `rustfmt`, `clippy`, and fish from
+the pinned flake input. Outside Nix, use your normal Rust toolchain.
 
-### Shell completions
+## Shell Files
 
-```shell
+Install completions:
+
+```sh
 pez completions fish > ~/.config/fish/completions/pez.fish
 ```
 
-Completions are intentionally Fish-only.
+Activate current-shell hooks:
 
-### Shell activation
-
-```shell
+```fish
 pez activate fish | source
 ```
 
-To persist, add it inside an `if status is-interactive ... end` block in `~/.config/fish/config.fish`.
+Persist activation from `~/.config/fish/config.fish`:
+
+```fish
+if status is-interactive
+    pez activate fish | source
+end
+```
+
+## Release Notes for Maintainers
+
+Tagged `v*.*.*` releases are built by CI and distributed through GitHub
+Releases. Do not hand-edit cargo-dist generated workflow output; change the
+generator configuration instead.
