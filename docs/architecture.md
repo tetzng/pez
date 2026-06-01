@@ -1,14 +1,15 @@
 # Architecture
 
-pez is a single Rust CLI. `src/main.rs` sets up logging, parses CLI arguments,
-and dispatches each command through `src/cmd/`.
+pez is a single Rust CLI. `src/main.rs` is the Tokio entrypoint and calls
+`pez::run()`. `src/lib.rs` parses CLI arguments, configures color and logging,
+and dispatches commands through `src/cmd/`.
 
 ## Module Map
 
 | Module | Responsibility |
 | --- | --- |
 | `src/cli.rs` | `clap` definitions for commands, arguments, and CLI target parsing. |
-| `src/cmd/` | Command orchestration. Each command exposes `pub(crate) run`. |
+| `src/cmd/` | Command orchestration. Most commands expose `pub(crate) run`; shell-output helpers such as activation and completion use dedicated functions. |
 | `src/config.rs` | Load, validate, and save `pez.toml`; convert config entries to install targets. |
 | `src/lock_file.rs` | Load, validate, and save `pez-lock.toml`; resolve installed files. |
 | `src/models.rs` | Shared types such as `PluginRepo`, `InstallTarget`, and `TargetDir`. |
