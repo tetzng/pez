@@ -216,8 +216,10 @@ in the current shell.
 
 When active:
 
-- `install` and `upgrade` source affected `conf.d` files and emit
-  `<stem>_install` or `<stem>_update`.
+- `install` and `upgrade` source `conf.d` files selected by
+  `pez files --from ...` and emit `<stem>_install` or `<stem>_update`.
+  With explicit plugin targets, the selection follows those targets. With no
+  targets, it uses the current lockfile entries.
 - `uninstall` emits `<stem>_uninstall` before running the raw uninstall command.
 - The wrapper sets `PEZ_SUPPRESS_EMIT=1` to avoid duplicate out-of-process
   emits.
