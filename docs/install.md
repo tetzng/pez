@@ -10,19 +10,26 @@
 ## Install a Release Binary
 
 Download the asset for your platform from
-[GitHub Releases](https://github.com/tetzng/pez/releases). Release assets may
-be archives, so extract the downloaded file first, then make the `pez` binary
-executable and place it on your `PATH`.
+[GitHub Releases](https://github.com/tetzng/pez/releases). Release assets are
+platform archives, so extract the downloaded file first.
+
+For macOS and Linux `.tar.xz` assets:
 
 ```sh
-tar -xf pez-*.tar.*
-chmod +x path/to/pez
-path/to/pez --version
+tar -xf pez-<target>.tar.xz
+chmod +x pez
+./pez --version
+```
+
+For Windows `.zip` assets in PowerShell:
+
+```powershell
+Expand-Archive .\pez-<target>.zip -DestinationPath .\pez-release
+.\pez-release\pez.exe --version
 ```
 
 Asset names vary by release and platform, so use the release page as the source
-of truth. Use the archive layout from the extracted asset when replacing
-`path/to/pez`.
+of truth. After verification, place `pez` or `pez.exe` on your `PATH`.
 
 ## Install with Cargo
 
