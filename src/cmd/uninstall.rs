@@ -148,7 +148,7 @@ pub(crate) fn uninstall(plugin_repo: &PluginRepo, force: bool) -> anyhow::Result
             }
 
             staged_removals.commit();
-            utils::remove_dir_all_best_effort(&repo_path);
+            utils::remove_dir_all_if_exists(&repo_path)?;
             locked
                 .files
                 .iter()
@@ -828,6 +828,76 @@ owner/plugin-a
                 .ok()
                 .as_ref()
                 == Some(&repo))
+        );
+    }
+
+    #[test]
+    fn uninstall_reports_repo_cleanup_failure() {
+        let _lock = crate::tests_support::log::env_lock().lock().unwrap();
+        let mut env = TestEnvironmentSetup::new();
+        let _override = EnvOverride::new(&[
+            "PEZ_SUPPRESS_EMIT",
+            "__fish_config_dir",
+            "PEZ_CONFIG_DIR",
+            "PEZ_DATA_DIR",
+        ]);
+        unsafe {
+            std::env::set_var("PEZ_SUPPRESS_EMIT", "1");
+            std::env::set_var("__fish_config_dir", &env.fish_config_dir);
+            std::env::set_var("PEZ_CONFIG_DIR", &env.config_dir);
+            std::env::set_var("PEZ_DATA_DIR", &env.data_dir);
+        }
+
+        let repo = PluginRepo {
+            host: None,
+            owner: "owner".into(),
+            repo: "blocked".into(),
+        };
+        env.setup_config(config::Config {
+            plugins: Some(vec![config::PluginSpec {
+                name: None,
+                source: config::PluginSource::Repo {
+                    repo: repo.clone(),
+                    version: None,
+                    branch: None,
+                    tag: None,
+                    commit: None,
+                },
+            }]),
+        });
+        env.setup_lock_file(LockFile {
+            version: 1,
+            plugins: vec![crate::lock_file::Plugin {
+                name: "blocked".into(),
+                repo: repo.clone(),
+                source: repo.default_remote_source(),
+                commit_sha: "abc1234".into(),
+                files: vec![PluginFile {
+                    dir: TargetDir::ConfD,
+                    name: "blocked.fish".into(),
+                }],
+            }],
+        });
+        env.setup_data_repo(vec![repo.clone()]);
+        env.setup_fish_config();
+        let repo_path = env.data_dir.join(repo.as_str());
+        let repo_file = repo_path.join("repo-file");
+        std::fs::write(&repo_file, "repo data").unwrap();
+        let original_perms = std::fs::metadata(&repo_path).unwrap().permissions();
+        let mut restricted_perms = original_perms.clone();
+        restricted_perms.set_mode(0o500);
+        std::fs::set_permissions(&repo_path, restricted_perms).unwrap();
+
+        let err = uninstall(&repo, true).expect_err("repo cleanup failure should be reported");
+        std::fs::set_permissions(&repo_path, original_perms).unwrap();
+        let err_text = format!("{:#}", err);
+        assert!(
+            err_text.contains("Failed to remove directory"),
+            "{err_text}"
+        );
+        assert!(
+            repo_path.exists(),
+            "repo directory should remain when cleanup fails"
         );
     }
 

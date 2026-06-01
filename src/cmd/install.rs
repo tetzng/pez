@@ -636,7 +636,7 @@ fn install_all(force: &bool, prune: &bool) -> anyhow::Result<()> {
                 lock_file.remove_plugin(&plugin.source);
                 lock_file.save(&lock_file_path)?;
                 staged_removals.commit();
-                utils::remove_dir_all_best_effort(&repo_path);
+                utils::remove_dir_all_if_exists(&repo_path)?;
                 emit_event(&plugin, &utils::Event::Uninstall)?;
             }
         } else {

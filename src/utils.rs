@@ -10,7 +10,10 @@ use std::{
     env,
     ffi::OsString,
     fmt, fs, io, path, process,
-    sync::{Mutex, OnceLock},
+    sync::{
+        Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
@@ -184,11 +187,13 @@ pub(crate) fn remove_file_if_exists(path: &path::Path) -> anyhow::Result<bool> {
     }
 }
 
-pub(crate) fn remove_dir_all_best_effort(path: &path::Path) {
+pub(crate) fn remove_dir_all_if_exists(path: &path::Path) -> anyhow::Result<bool> {
     match fs::remove_dir_all(path) {
-        Ok(()) => {}
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-        Err(err) => warn!("Failed to remove directory {}: {:?}", path.display(), err),
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => {
+            Err(err).with_context(|| format!("Failed to remove directory {}", path.display()))
+        }
     }
 }
 
@@ -301,16 +306,21 @@ pub(crate) fn stage_files_for_removal(
 }
 
 fn unique_staged_removal_path(path: &path::Path, index: usize) -> anyhow::Result<path::PathBuf> {
+    static NEXT_STAGED_REMOVAL_ID: AtomicU64 = AtomicU64::new(0);
+
     let parent = path
         .parent()
         .with_context(|| format!("Failed to remove {}: path has no parent", path.display()))?;
     let file_name = path
         .file_name()
         .with_context(|| format!("Failed to remove {}: path has no file name", path.display()))?;
+    let removal_id = NEXT_STAGED_REMOVAL_ID.fetch_add(1, Ordering::Relaxed);
 
     for attempt in 0..1000 {
         let mut staged_name = OsString::from(".pez-removing-");
         staged_name.push(process::id().to_string());
+        staged_name.push("-");
+        staged_name.push(removal_id.to_string());
         staged_name.push("-");
         staged_name.push(index.to_string());
         staged_name.push("-");
@@ -790,6 +800,17 @@ mod tests {
         assert!(!path.exists());
         drop(staged);
         assert!(path.is_file());
+    }
+
+    #[test]
+    fn unique_staged_removal_path_returns_distinct_candidates_for_same_input() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("plugin.fish");
+
+        let first = unique_staged_removal_path(&path, 0).unwrap();
+        let second = unique_staged_removal_path(&path, 0).unwrap();
+
+        assert_ne!(first, second);
     }
 
     #[test]

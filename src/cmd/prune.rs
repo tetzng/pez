@@ -167,7 +167,7 @@ where
         ctx.lock_file.remove_plugin(&plugin.source);
         ctx.lock_file.save(ctx.lock_file_path)?;
         staged_removals.commit();
-        utils::remove_dir_all_best_effort(&repo_path);
+        utils::remove_dir_all_if_exists(&repo_path)?;
     }
     info!(
         "\n{}All uninstalled plugins have been pruned successfully!",
@@ -297,7 +297,7 @@ where
             removals.commit();
         }
         for repo_path in repo_paths {
-            utils::remove_dir_all_best_effort(&repo_path);
+            utils::remove_dir_all_if_exists(&repo_path)?;
         }
     }
 
