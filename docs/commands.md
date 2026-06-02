@@ -8,7 +8,7 @@ Global options:
 
 | Option | Meaning |
 | --- | --- |
-| `-v`, `--verbose` | Increase log verbosity. Logs default to info; use `-vv` for debug logs. |
+| `-v`, `--verbose` | Set log verbosity. Logs default to info; use `-vv` for debug logs. |
 | `--jobs <N>` | Set the number of parallel jobs for explicit install clones, `upgrade`, `uninstall`, and `prune`. Must be at least 1. |
 | `-h`, `--help` | Print help. |
 | `-V`, `--version` | Print version. |
