@@ -1,70 +1,118 @@
-## Getting started
+# Getting Started
 
-### Quick start
+This guide takes you from a new `pez.toml` to an installed, inspectable fish
+plugin setup.
 
-1) Initialize configuration (creates `pez.toml`)
+## 1. Create the config file
 
-```shell
+```sh
 pez init
 ```
 
-2) Add a plugin to `pez.toml` (choose one of repo/url/path)
+`pez.toml` is created under the fish config directory unless `PEZ_CONFIG_DIR`
+overrides it.
+
+## 2. Add plugins
+
+Use one source per plugin.
+
+GitHub shorthand:
 
 ```toml
 [[plugins]]
-repo = "owner/repo"      # GitHub shorthand
-# version = "v3"        # Or: tag = "...", branch = "...", commit = "..."
-
-## Or a full Git URL
-# [[plugins]]
-# url = "https://gitlab.com/owner/repo"
-# branch = "main"
-
-## Or a local directory (absolute or ~/ only)
-# [[plugins]]
-# path = "~/path/to/local/plugin"
+repo = "owner/repo"
 ```
 
-3) Install and list
+Another Git host:
 
-```shell
+```toml
+[[plugins]]
+repo = "gitlab.com/owner/repo"
+branch = "main"
+```
+
+Full Git URL:
+
+```toml
+[[plugins]]
+url = "https://example.com/owner/repo"
+tag = "v1.2.3"
+```
+
+Local directory:
+
+```toml
+[[plugins]]
+path = "~/plugins/local-plugin"
+```
+
+Selectors are optional. Use at most one of `version`, `branch`, `tag`, or
+`commit`.
+
+## 3. Install and verify
+
+```sh
 pez install
 pez list --format table
+pez doctor
 ```
 
-4) Optional: enable completions for pez itself
+`pez install` copies supported fish assets into the target fish config
+directories and records installed files in `pez-lock.toml`.
 
-```shell
+## 4. Install directly from the CLI
+
+CLI installs also update `pez.toml`, so future `pez install` runs remain in
+sync.
+
+```sh
+pez install owner/repo
+pez install owner/repo@v3
+pez install gitlab.com/owner/repo@branch:main
+pez install https://example.com/owner/repo.git
+pez install ./local-plugin
+```
+
+For shorthand targets, plain `@ref` is treated as `version`. Use
+`@branch:name`, `@tag:name`, or `@commit:sha` when the selector type matters.
+Full URLs are not parsed for `@ref`; put selectors in `pez.toml` for URL
+sources.
+
+## 5. Enable optional shell integration
+
+Completions:
+
+```sh
 pez completions fish > ~/.config/fish/completions/pez.fish
 ```
 
-Completions are intentionally Fish-only.
+Current-shell activation for `conf.d` hooks:
 
-5) Optional: enable fish shell hooks (conf.d events) for the current shell
-
-```shell
+```fish
 pez activate fish | source
 ```
 
-To persist, add it inside an `if status is-interactive ... end` block in `~/.config/fish/config.fish`.
+To persist activation, add it to `~/.config/fish/config.fish` inside an
+interactive-shell guard:
 
-### CLI usage (examples)
+```fish
+if status is-interactive
+    pez activate fish | source
+end
+```
 
-| Command | Purpose | Example |
-| --- | --- | --- |
-| `pez init` | Create `pez.toml` | `pez init` |
-| `pez install` | Install from `pez.toml` | `pez install` |
-| `pez install <target>` | Install a specific plugin | `pez install owner/repo@v3` |
-| `pez uninstall <repo>` | Uninstall a plugin | `pez uninstall owner/repo` |
-| `pez upgrade` | Update non‑local plugins to remote HEAD | `pez upgrade` |
-| `pez list --outdated` | Show outdated plugins | `pez list --outdated --format json` |
-| `pez doctor` | Run diagnostics | `pez doctor --format json` |
-| `pez activate fish` | Enable fish shell hooks | `pez activate fish | source` |
-| `pez files --all` | List installed files | `pez files --all` |
+## Daily Commands
 
-Key flag: `-v/--verbose` increases logging (`-vv` enables debug).
+| Task | Command |
+| --- | --- |
+| Install configured plugins | `pez install` |
+| Install one plugin | `pez install owner/repo` |
+| Update plugins | `pez upgrade` |
+| Show installed plugins | `pez list --format table` |
+| Show outdated remote plugins | `pez list --outdated --format table` |
+| Show installed files | `pez files --all` |
+| Diagnose setup state | `pez doctor` |
+| Remove lockfile-only plugins | `pez prune --dry-run` |
 
-### Notes
-
-- Selectors (version/branch/tag/commit) are honored across installs and by `upgrade`. When no selector is set, `upgrade` updates to the latest commit on the remote default branch (remote HEAD).
-- Duplicate destination paths are detected for both CLI targets and installs from `pez.toml`. Conflicting plugins are skipped with a warning to avoid overwriting existing files.
+Logs default to info. Use `-vv` for debug logs. Use `--jobs <N>` to set the
+number of parallel jobs where the command supports it.

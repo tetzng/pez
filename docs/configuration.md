@@ -1,95 +1,100 @@
 # Configuration and Lockfile
 
-This document describes the user‑facing configuration files used by pez.
+pez has two primary state files:
 
-## Locations and Precedence
+- `pez.toml`: the plugin list you edit.
+- `pez-lock.toml`: the installed state that pez writes.
 
-- Config files (`pez.toml`, `pez-lock.toml`):
-  `PEZ_CONFIG_DIR` > `__fish_config_dir` > `XDG_CONFIG_HOME/fish` > `~/.config/fish`
-- Data directory (cloned repos):
-  `PEZ_DATA_DIR` > `__fish_user_data_dir/pez` > `XDG_DATA_HOME/fish/pez` > `~/.local/share/fish/pez`
-- Copy destination:
-  `PEZ_TARGET_DIR` > `__fish_config_dir` > `XDG_CONFIG_HOME/fish` > `~/.config/fish`
+## Locations
 
-`PEZ_TARGET_DIR` only affects where plugin files are copied; configuration and
-lock files always live under the config precedence above.
+| Purpose | Precedence |
+| --- | --- |
+| Config and lockfile | `PEZ_CONFIG_DIR` > `__fish_config_dir` > `XDG_CONFIG_HOME/fish` > `~/.config/fish` |
+| Cached Git repos | `PEZ_DATA_DIR` > `__fish_user_data_dir/pez` > `XDG_DATA_HOME/fish/pez` > `~/.local/share/fish/pez` |
+| Copied plugin files | `PEZ_TARGET_DIR` > `__fish_config_dir` > `XDG_CONFIG_HOME/fish` > `~/.config/fish` |
+
+`PEZ_TARGET_DIR` changes only where plugin files are copied. It does not move
+`pez.toml` or `pez-lock.toml`.
 
 ## pez.toml
 
-Define the plugins you want pez to manage. Each entry must specify exactly one
-source kind and at most one version selector.
+Each `[[plugins]]` entry uses exactly one source: `repo`, `url`, or `path`.
+Remote sources may use at most one selector: `version`, `branch`, `tag`, or
+`commit`.
 
-Rules
-
-- Source: choose exactly one of `repo` (GitHub shorthand), `url` (full Git URL), or `path` (local directory).
-- Selector: choose at most one of `version`, `branch`, `tag`, or `commit`.
-- Name (optional): set `name = "..."` to override the display name recorded in the lockfile and shown in `list`.
-
-GitHub shorthand (repo source)
+GitHub shorthand:
 
 ```toml
 [[plugins]]
 repo = "owner/repo"
-# version = "latest"   # default if omitted; or "v3" (branch preferred over tags)
-# branch  = "main"
-# tag     = "v1.2.3"
-# commit  = "<sha>"    # 7+ chars recommended
-#
-# Non-GitHub host example
-# [[plugins]]
-# repo = "gitlab.com/owner/repo"
-# version = "latest"
 ```
 
-Generic Git host (url source)
+Host-prefixed shorthand:
 
 ```toml
 [[plugins]]
-url = "https://gitlab.com/owner/repo"
-# version = "v3"
-# branch  = "main"
-# tag     = "v1.2.3"
-# commit  = "<sha>"
+repo = "gitlab.com/owner/repo"
+branch = "main"
 ```
 
-Local directory (path source)
+Full Git URL:
 
 ```toml
 [[plugins]]
-path = "~/path/to/local/plugin"   # absolute or ~/ only
+url = "https://example.com/owner/repo.git"
+tag = "v1.2.3"
 ```
 
-Notes
+Local path:
 
-- If a URL has no scheme, pez normalizes it to https (e.g., `gitlab.com/...`).
-- CLI‑provided relative paths and `~/` are normalized to absolute paths when recorded.
-- `path` must resolve to an absolute path (either absolute or `~/…`).
-- Host-prefixed repos (e.g., `gitlab.com/owner/repo`) are recorded as-is and cloned under `<host>/<owner>/<repo>` inside the data directory. GitHub shorthand (`owner/repo`) continues to map to `github.com`.
-- Unknown keys in `pez.toml` are rejected at load time.
-- `path` sources cannot include version selectors (`version`/`branch`/`tag`/`commit`).
-
-## JSON Schema
-
-`config.schema.json` provides a JSON Schema representation of the `pez.toml`
-plugin spec rules.
-
-Regenerate it with:
-
-```sh
-cargo run --features schema-gen --bin gen-config-schema
+```toml
+[[plugins]]
+path = "~/plugins/local-plugin"
 ```
 
-When changing config-related types or validation rules, regenerate
-`config.schema.json` and include the updated file in the same commit.
+Custom display name:
+
+```toml
+[[plugins]]
+name = "prompt"
+repo = "owner/fish-prompt"
+```
+
+Rules:
+
+- `repo = "owner/repo"` resolves to GitHub.
+- `repo = "host/owner/repo"` resolves to `https://host/owner/repo`.
+- `url` values without a scheme are accepted and normalized to `https://`.
+- SCP-style SSH remotes such as `git@host:owner/repo.git` are accepted by the
+  parser but are not a supported scheme-less `url` form; they are normalized as
+  HTTPS URLs. Use `ssh://git@host/owner/repo.git` or
+  `repo = "host/owner/repo"` instead.
+- `path` values must be absolute or start with `~/` in `pez.toml`.
+- CLI installs may use relative paths; pez normalizes them before saving.
+- Unknown keys are rejected.
+- `path` sources cannot use selectors.
+
+## Selectors
+
+| Field | Meaning |
+| --- | --- |
+| `version = "v3"` | Branch-or-tag version selector. Branches are preferred over tags. Semver tag prefixes are supported. |
+| `version = "latest"` | Remote default branch. |
+| `branch = "main"` | Named branch. |
+| `tag = "v1.2.3"` | Exact tag. |
+| `commit = "<sha>"` | Exact commit. |
+
+When no selector is set, install and upgrade use the remote default branch.
 
 ## pez-lock.toml
 
-Machine‑generated; do not edit. The lock file records the concrete state pez has
-installed: `name`, `repo`, `source`, `commit_sha`, and copied `files`.
+`pez-lock.toml` is generated. Do not edit it manually.
 
-Example
+It records the installed plugin name, repo identifier, source URL or local path,
+installed commit, and copied files:
 
 ```toml
+# This file is automatically generated by pez. Do not edit it manually.
 version = 1
 
 [[plugins]]
@@ -107,38 +112,77 @@ commit_sha = "abc1234..."
   name = "bar.fish"
 ```
 
-Notes
+Local plugins use `commit_sha = "local"`. They are skipped by `upgrade` and
+excluded from outdated comparisons.
 
-- For local sources, `commit_sha = "local"`. Such entries are skipped by
-  `upgrade` and excluded from `list --outdated` comparisons.
+## Copy Rules
 
-## Plugin Layout and Copy Rules
+pez copies only supported fish assets from top-level plugin directories:
 
-- pez looks for top-level `functions`, `completions`, `conf.d`, and `themes` directories in each plugin repo.
-- It copies files recursively into the matching Fish config directories, preserving relative paths.
-- Only `.fish` files are copied from `functions`/`completions`/`conf.d`, and only `.theme` files from `themes`.
-- If two plugins would write the same destination path in a single run, the later plugin is skipped and its files are not recorded in the lockfile.
-- For `conf.d` files with safe stems (`A-Z`, `a-z`, `0-9`, `_`, `-`, or `.`), pez emits out-of-process `<stem>_{install|update|uninstall}` events unless `PEZ_SUPPRESS_EMIT` is set. Raw uninstall emits run only after cleanup and state updates succeed; the activation wrapper sources and emits uninstall hooks before running `pez uninstall` in the current shell.
+| Source directory | Copied files |
+| --- | --- |
+| `functions` | `.fish` files |
+| `completions` | `.fish` files |
+| `conf.d` | `.fish` files |
+| `themes` | `.theme` files |
 
-## Environment Variables and CLI Overrides
+Subdirectories are preserved. Explicit CLI installs, and config-driven installs
+when they copy a plugin already tracked in `pez-lock.toml`, use run-level
+duplicate destination checks: if a later plugin would write a path already
+claimed earlier in the same run, pez skips that plugin's file copies. The plugin
+entry can still appear in `pez-lock.toml`, but copied files are not recorded for
+that plugin. Fresh config-driven entries are copied directly; use `pez doctor`
+after install to inspect duplicate destination issues.
 
-- `PEZ_CONFIG_DIR` — Directory containing `pez.toml` and `pez-lock.toml`.
-- `PEZ_DATA_DIR` — Base directory for cloned plugin repositories.
-- `PEZ_TARGET_DIR` — Override the Fish config directory used for copying plugin files. It no longer changes where `pez.toml` or `pez-lock.toml` live.
-- `PEZ_SUPPRESS_EMIT` — When set, suppress out-of-process fish event hooks during install/upgrade/uninstall. Used by `pez activate fish` to avoid duplicate events.
-- `__fish_config_dir` / `XDG_CONFIG_HOME` — Fish configuration directory.
-- `__fish_user_data_dir` / `XDG_DATA_HOME` — Fish data directory.
-- `--jobs <N>` — Global CLI flag to override concurrency for `install` (explicit
-  targets), `upgrade`, `uninstall`, and `prune`. Must be a positive integer.
-- `PEZ_JOBS` — Environment override for the same concurrency (default: 4). Ignored
-  when `--jobs` is provided.
-- `RUST_LOG` — Log filtering (takes precedence over `-v`).
+## Hooks and Activation
 
-### Migration Note (PEZ_TARGET_DIR)
+For `conf.d` files with safe stems, pez emits fish events:
 
-Releases after September 16, 2025 keep configuration files under the config
-precedence `PEZ_CONFIG_DIR` → `__fish_config_dir` → `XDG_CONFIG_HOME/fish` →
-`~/.config/fish`, even when `PEZ_TARGET_DIR` is set. If your existing
-`pez.toml` or `pez-lock.toml` live in a path referenced solely by
-`PEZ_TARGET_DIR`, move them into a directory referenced by `PEZ_CONFIG_DIR`
-or set `PEZ_CONFIG_DIR` to that path before invoking pez.
+- `<stem>_install`
+- `<stem>_update`
+- `<stem>_uninstall`
+
+Safe stems may contain `A-Z`, `a-z`, `0-9`, `_`, `-`, and `.`.
+
+Without activation, these events are emitted out of process. Source
+`pez activate fish` when plugins need hooks to affect the current shell:
+
+```fish
+pez activate fish | source
+```
+
+The activation wrapper sets `PEZ_SUPPRESS_EMIT=1` to avoid duplicate events.
+
+## Environment Variables
+
+| Variable | Meaning |
+| --- | --- |
+| `PEZ_CONFIG_DIR` | Directory for `pez.toml` and `pez-lock.toml`. |
+| `PEZ_DATA_DIR` | Base directory for cached plugin repositories. |
+| `PEZ_TARGET_DIR` | Destination fish config directory for copied plugin files. |
+| `PEZ_SUPPRESS_EMIT` | Suppress out-of-process hook emits. Used by activation. |
+| `PEZ_JOBS` | Default parallel job count when `--jobs` is not set. |
+| `RUST_LOG` | Log filtering. Takes precedence over `-v`. |
+
+fish and XDG variables also participate in path resolution:
+`__fish_config_dir`, `__fish_user_data_dir`, `XDG_CONFIG_HOME`, and
+`XDG_DATA_HOME`.
+
+## JSON Schema
+
+`config.schema.json` describes the `pez.toml` shape.
+
+Regenerate it after config model changes:
+
+```sh
+cargo run --features schema-gen --bin gen-config-schema
+```
+
+Include the schema update in the same change as the model change.
+
+## PEZ_TARGET_DIR Migration Note
+
+Modern pez releases keep `pez.toml` and `pez-lock.toml` under the config
+precedence even when `PEZ_TARGET_DIR` is set. If older local state lives only
+under `PEZ_TARGET_DIR`, move it to `PEZ_CONFIG_DIR` or set `PEZ_CONFIG_DIR` to
+that location before running pez.

@@ -1,5 +1,5 @@
 {
-  description = "A Rust-based plugin manager for fish";
+  description = "A lockfile-backed plugin manager for fish";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";

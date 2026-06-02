@@ -1,41 +1,119 @@
-## FAQ
+# FAQ
 
-### Where does pez put files?
+## Where does pez put plugin files?
 
-pez copies plugin files into your Fish config directory (`functions`, `completions`, `conf.d`, `themes`). See docs/configuration.md for directory precedence.
+By default, pez copies files into the fish config directory:
+`functions`, `completions`, `conf.d`, and `themes`.
 
-### How is load order determined?
+Use `PEZ_TARGET_DIR` to override the copy destination. See
+[configuration](configuration.md) for full path precedence.
 
-pez only copies files into the Fish config directories; Fish determines when and how they are loaded. If you need a specific order, manage it in your Fish configuration.
+## Where are repositories cloned?
 
-### Where are plugin repos cloned?
+Under the pez data directory. The default is `~/.local/share/fish/pez`.
 
-Under the pez data directory (by default `~/.local/share/fish/pez`). You can override via `PEZ_DATA_DIR`.
+Use `PEZ_DATA_DIR` to override it.
 
-### Why doesn't `upgrade` change my plugin pinned by tag/branch in pez.toml?
+## What does the lockfile track?
 
-`upgrade` respects selectors defined in `pez.toml`. If you pin a plugin to a specific `branch`, `tag`, `commit`, or `version`, `upgrade` resolves against that selector. When no selector is set, `upgrade` updates to the latest commit on the remote default branch (remote HEAD).
+`pez-lock.toml` records each installed plugin's name, repo identifier, source,
+installed commit, and copied files. Commands such as `uninstall`, `prune`,
+`doctor`, and `files` use it as the installed-state record.
 
-### How are duplicates handled when copying files?
+## How is load order determined?
 
-- Duplicate destination paths are detected for both CLI targets and installs from `pez.toml`. Conflicting plugins are skipped with a warning to avoid overwriting existing files.
+pez copies files. fish decides when they load.
 
-### How do I list the files installed by a plugin?
+If a plugin needs a specific order, manage that through fish configuration or
+plugin filenames.
 
-Use `pez files owner/repo` for a single plugin or `pez files --all` for everything. Add `--dir conf.d` to filter to conf.d scripts.
+## Why wasn't a plugin upgraded?
 
-### How do I run conf.d hooks in my current shell?
+Check whether the plugin has a selector in `pez.toml`.
 
-Source the activation script: `pez activate fish | source`. For persistence, place it in `~/.config/fish/config.fish` inside `if status is-interactive ... end`. This wraps `pez` so `install`/`upgrade`/`uninstall` source the affected conf.d files and emit events in the current shell.
+- `branch`, `tag`, `commit`, and `version` selectors are respected.
+- Local path plugins are skipped.
+- Unpinned remote plugins update to the remote default branch.
 
-### How do I uninstall everything not in pez.toml?
+## How are duplicate files handled?
 
-Run `pez prune`. Use `--dry-run` to preview and `--yes` to skip confirmation when `pez.toml` has no `[[plugins]]` entries.
+Explicit CLI installs, and config-driven installs when they copy a plugin
+already tracked in `pez-lock.toml`, check duplicate destinations within the
+current run. If a later plugin would write a claimed path, pez skips that
+plugin's file copies. The plugin can still appear in `pez-lock.toml`; only
+copied files are recorded, so that entry may have an empty `files` list.
 
-### How do I use a local plugin?
+Fresh config-driven entries are copied directly.
 
-Add `[[plugins]] path = "~/path/to/plugin"`. Local sources are not upgraded and are excluded from `list --outdated`.
+Use `pez doctor` to inspect duplicate destination issues.
 
-### I installed the same repo twice with a different name — is that supported?
+## How do I see what a plugin installed?
 
-Not supported: `pez.toml` entries are unique by repo, and the lockfile also enforces unique source/name. Prefer a single install per repo. If you need a custom display name, set `name = "..."` in the plugin spec.
+```sh
+pez files owner/repo
+pez files owner/repo --dir conf.d
+pez files --all
+```
+
+Use `--format json` for machine-readable output.
+
+## How do I run conf.d hooks in the current shell?
+
+Source activation:
+
+```fish
+pez activate fish | source
+```
+
+For persistence:
+
+```fish
+if status is-interactive
+    pez activate fish | source
+end
+```
+
+This wraps `pez` so install, upgrade, and uninstall hooks can affect the current
+shell.
+
+## How do I remove plugins no longer listed in pez.toml?
+
+Preview first:
+
+```sh
+pez prune --dry-run
+```
+
+Then prune:
+
+```sh
+pez prune
+```
+
+Use `--yes` to confirm prompts in scripts.
+
+## How do I use a local plugin?
+
+In `pez.toml`:
+
+```toml
+[[plugins]]
+path = "~/plugins/local-plugin"
+```
+
+Or from the CLI:
+
+```sh
+pez install ./local-plugin
+```
+
+CLI relative paths are saved as absolute paths. Local plugins are skipped by
+`upgrade` and excluded from `list --outdated`.
+
+## Can I install the same repo twice?
+
+Not as separate managed entries. `pez.toml` is unique by repo, and
+`pez-lock.toml` rejects duplicate source or name entries.
+
+Use one entry per repo. Set `name = "..."` only when you need a different
+display name.

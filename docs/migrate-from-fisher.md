@@ -1,57 +1,72 @@
-# Migrate from fisher to pez
+# Migrate from fisher
 
-This guide provides a low-risk migration path from `fisher` to `pez`.
+pez can import fisher's `fish_plugins` into `pez.toml`. Keep the migration
+reversible until `pez doctor` reports a setup you trust.
 
-## Recommended path
+## Recommended Flow
 
-1. Enable activation in your current shell.
+1. Back up your fish config.
+2. Enable current-shell activation.
 
 ```fish
 pez activate fish | source
 ```
 
-2. Import `fish_plugins` into `pez.toml`.
+3. Preview the import.
+
+```fish
+pez migrate --dry-run
+```
+
+4. Import `fish_plugins`.
 
 ```fish
 pez migrate
 ```
 
-3. Install migrated plugins.
+5. Install and verify.
 
 ```fish
 pez install
-```
-
-4. Verify the result.
-
-```fish
 pez list --format table
 pez doctor
 ```
 
-5. Remove or disable fisher after verification.
+6. Remove or disable fisher only after verification.
 
-## Common pitfalls
+## Faster Flow
 
-- `pez activate fish` is not enabled:
-  `install`/`upgrade`/`uninstall` complete, but in-process `conf.d` events are not emitted in the current shell.
-- `fisher` itself was removed during migration:
-  this is expected; `jorgebucaran/fisher` is skipped by `pez migrate`.
-- `conf.d` behavior differs before activation:
-  without activation wrapper, hooks are emitted out-of-process and may not affect the current interactive shell session.
+Use `--install` when `pez migrate --dry-run` shows entries that do not need
+manual edits before install:
 
-## What pez handles (and does not)
+```fish
+pez activate fish | source
+pez migrate --install
+pez list --format table
+pez doctor
+```
 
-- Handled:
-  - Reads `fish_plugins`, ignores blank/comment lines, and merges entries into `pez.toml`.
-  - Copies plugin assets from `functions`, `completions`, `conf.d`, `themes`.
-  - Tracks installed files and commits in `pez-lock.toml`.
-- Not handled automatically:
-  - Editing your `config.fish` to persist activation.
-  - Removing fisher from your shell config.
-  - Recovering custom manual edits in plugin-managed files.
+## What migrate does
 
-## fisher and pez command mapping
+- Reads fisher's `fish_plugins`.
+- Ignores blank lines and comments.
+- Skips `jorgebucaran/fisher`.
+- Merges imported entries into `pez.toml` by default.
+- Preserves supported ref suffixes such as `owner/repo@2.0.0`,
+  `owner/repo@tag:v1`, `owner/repo@branch:main`, and
+  `owner/repo@commit:<sha>`.
+
+Use `--force` only when you want the imported list to replace the current
+`pez.toml` plugin list.
+
+## What migrate does not do
+
+- It does not edit `config.fish` to persist activation.
+- It does not remove fisher from your shell config.
+- It does not recover manual edits inside plugin-managed files.
+- It does not sandbox or verify plugin code.
+
+## Command Mapping
 
 | fisher | pez |
 | --- | --- |
@@ -59,19 +74,37 @@ pez doctor
 | `fisher remove owner/repo` | `pez uninstall owner/repo` |
 | `fisher update` | `pez upgrade` |
 | `fisher list` | `pez list --format table` |
-| `fisher` diagnostics (manual checks) | `pez doctor` |
+| Manual checks | `pez doctor` |
+
+## Common Pitfalls
+
+- Without `pez activate fish | source`, install and upgrade still run, but
+  hooks may not affect the current interactive shell.
+- fisher itself being absent from `pez.toml` is expected. `pez migrate` skips it.
+- URL-style fisher entries with ambiguous `@ref` suffixes may be ignored. Convert
+  them to shorthand form or write explicit `url` entries in `pez.toml`.
+- SCP-style SSH entries such as `git@host:owner/repo.git` can be imported, but
+  `pez.toml` accepts scheme-less `url` values by normalizing them as HTTPS, not
+  as SCP-style SSH remotes. Before running `pez install` or
+  `pez migrate --install`, convert them to `ssh://git@host/owner/repo.git` or
+  `repo = "host/owner/repo"`.
 
 ## Rollback
 
-If you want to go back to fisher:
+1. Keep the backed-up fisher files until the migration is verified.
+2. Remove migrated entries from `pez.toml`, or uninstall the migrated repos
+   explicitly.
 
-1. Keep a backup of current `pez.toml` and `pez-lock.toml`.
-2. Remove pez-managed plugin files if needed:
+```fish
+pez uninstall owner/repo
+```
+
+3. If you removed entries from `pez.toml`, prune the lockfile-only plugins.
 
 ```fish
 pez prune --force --yes
 ```
 
-3. Remove or comment out `pez activate fish` from `config.fish`.
-4. Reinstall and re-enable fisher.
-5. Restore `fish_plugins` from backup and run fisher install flow.
+4. Remove or comment out `pez activate fish` from `config.fish`.
+5. Re-enable fisher.
+6. Restore `fish_plugins` from backup and run fisher's install flow.
