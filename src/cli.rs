@@ -20,7 +20,7 @@ pub(crate) struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub(crate) verbose: u8,
 
-    /// Set the number of parallel jobs for explicit install clones, upgrade, uninstall, and prune (default: 4 when unset)
+    /// Set the number of parallel jobs for explicit install clones, upgrade, uninstall, and prune (default: PEZ_JOBS, falling back to 4)
     #[arg(long, value_name = "N", value_parser = parse_jobs_override, global = true)]
     pub(crate) jobs: Option<usize>,
 
