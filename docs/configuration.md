@@ -3,7 +3,7 @@
 pez has two primary state files:
 
 - `pez.toml`: the plugin list you edit.
-- `pez-lock.toml`: the installed state pez writes.
+- `pez-lock.toml`: the installed state that pez writes.
 
 ## Locations
 

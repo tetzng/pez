@@ -4,7 +4,8 @@
 
 - A prebuilt `pez` binary does not require Cargo.
 - Cargo is required for `cargo install` and source builds.
-- fish is required to use installed fish plugins and to source activation code.
+- The fish shell is required to use installed plugins and to source the
+  activation code.
 - Nix is optional.
 
 ## Install a Release Binary

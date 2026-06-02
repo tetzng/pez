@@ -8,8 +8,8 @@ Global options:
 
 | Option | Meaning |
 | --- | --- |
-| `-v`, `--verbose` | Log verbosity flag. Logs default to info; use `-vv` for debug logs. |
-| `--jobs <N>` | Override parallel work for explicit install clones, `upgrade`, `uninstall`, and `prune`. Must be at least 1. |
+| `-v`, `--verbose` | Increase log verbosity. Logs default to info; use `-vv` for debug logs. |
+| `--jobs <N>` | Set the number of parallel jobs for explicit install clones, `upgrade`, `uninstall`, and `prune`. Must be at least 1. |
 | `-h`, `--help` | Print help. |
 | `-V`, `--version` | Print version. |
 
@@ -224,8 +224,8 @@ When active:
 - The wrapper sets `PEZ_SUPPRESS_EMIT=1` to avoid duplicate out-of-process
   emits.
 
-Out-of-process emits only run for safe stems made from `A-Z`, `a-z`, `0-9`,
-`_`, `-`, and `.`.
+Out-of-process hook events are emitted only for safe stems containing only
+`A-Z`, `a-z`, `0-9`, `_`, `-`, and `.`.
 
 ## migrate
 

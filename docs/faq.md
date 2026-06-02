@@ -27,7 +27,7 @@ pez copies files. fish decides when they load.
 If a plugin needs a specific order, manage that through fish configuration or
 plugin filenames.
 
-## Why did upgrade not move a plugin?
+## Why wasn't a plugin upgraded?
 
 Check whether the plugin has a selector in `pez.toml`.
 

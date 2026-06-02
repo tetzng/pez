@@ -16,11 +16,11 @@ fn parse_jobs_override(raw: &str) -> Result<usize, String> {
 #[derive(Parser, Debug)]
 #[command(name = "pez", version, about, long_about = None)]
 pub(crate) struct Cli {
-    /// Log verbosity flag (default info; -vv enables debug)
+    /// Increase log verbosity (default: info; -vv enables debug logs)
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub(crate) verbose: u8,
 
-    /// Override job concurrency for explicit install clones, upgrade, uninstall, and prune (default: 4 when unset)
+    /// Set the number of parallel jobs for explicit install clones, upgrade, uninstall, and prune (default: 4 when unset)
     #[arg(long, value_name = "N", value_parser = parse_jobs_override, global = true)]
     pub(crate) jobs: Option<usize>,
 

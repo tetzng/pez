@@ -1,7 +1,7 @@
 # Getting Started
 
-This guide gets from a new `pez.toml` to an installed, inspectable fish plugin
-setup.
+This guide takes you from a new `pez.toml` to an installed, inspectable fish
+plugin setup.
 
 ## 1. Create the config file
 
@@ -114,5 +114,5 @@ end
 | Diagnose setup state | `pez doctor` |
 | Remove lockfile-only plugins | `pez prune --dry-run` |
 
-Logs default to info. Use `-vv` for debug logs. Use `--jobs <N>` to override
-parallel work where the command supports it.
+Logs default to info. Use `-vv` for debug logs. Use `--jobs <N>` to set the
+number of parallel jobs where the command supports it.
