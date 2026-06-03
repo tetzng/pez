@@ -175,7 +175,7 @@ fish and XDG variables also participate in path resolution:
 Regenerate it after config model changes:
 
 ```sh
-cargo run --features schema-gen --bin gen-config-schema
+cargo run -p xtask -- gen-config-schema
 ```
 
 Include the schema update in the same change as the model change.

@@ -21,7 +21,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
         with:
           toolchain: ${{ matrix.rust }}
-      - run: cargo test --all-features
+      - run: cargo test --workspace --all-features
   formatting:
     name: cargo fmt
     runs-on: ubuntu-latest
@@ -46,7 +46,7 @@ jobs:
         with:
           components: clippy
       - name: clippy "No Default Features"
-        run: cargo clippy --workspace --no-default-features --all-targets
+        run: cargo clippy -p pez --no-default-features --all-targets
       - name: clippy "Default"
         run: cargo clippy --workspace --all-targets
       - name: clippy "All Features"
@@ -60,6 +60,6 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
       - name: regenerate schema
-        run: cargo run --features schema-gen --bin gen-config-schema
+        run: cargo run -p xtask -- gen-config-schema
       - name: check schema up to date
         run: git diff --exit-code -- config.schema.json
