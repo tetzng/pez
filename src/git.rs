@@ -379,6 +379,15 @@ mod tests {
     use std::path::Path;
     use tempfile::tempdir;
 
+    #[test]
+    fn libgit2_is_built_with_https_support() {
+        let version = git2::Version::get();
+        assert!(
+            version.https(),
+            "libgit2 must be built with HTTPS support: {version:?}"
+        );
+    }
+
     fn init_repo_with_commit(path: &Path) -> (git2::Repository, git2::Oid) {
         let repo = git2::Repository::init(path).unwrap();
         let mut cfg = repo.config().unwrap();
